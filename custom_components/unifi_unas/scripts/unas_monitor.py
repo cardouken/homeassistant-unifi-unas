@@ -67,17 +67,16 @@ BAY_MAPPINGS = {
         "3": "3",
         "4": "4"
     },
-    # UNAS 2 all unconfirmed, just assumed defaults to allow drive discovery even if mapped incorrectly
     "UNAS_2": {
-        "1": "1",
-        "2": "2"
+        "1": "1", # confirmed
+        "2": "2" # assuming for now
     },
     # UNVR - user-reported mapping from issue #11
     "UNVR": {
-        "1": "1",
-        "3": "2",
-        "5": "3",
-        "7": "4"
+        "1": "3",
+        "3": "4",
+        "5": "2",
+        "7": "1"
     }
 }
 
