@@ -245,8 +245,16 @@ async def async_setup_entry(
     coordinator.sensor_add_entities = async_add_entities
 
     async def discover_drives():
-        for _ in range(6):
-            await asyncio.sleep(10)
+        await _discover_and_add_drive_sensors(coordinator, async_add_entities)
+        await _discover_and_add_nvme_sensors(coordinator, async_add_entities)
+        await _discover_and_add_pool_sensors(coordinator, async_add_entities)
+
+        if coordinator.discovered_bays or coordinator.discovered_nvmes or coordinator.discovered_pools:
+            return
+
+        # if drives not found immediately, poll with shorter intervals (12 × 5s = 60s max)
+        for _ in range(12):
+            await asyncio.sleep(5)
             await _discover_and_add_drive_sensors(coordinator, async_add_entities)
             await _discover_and_add_nvme_sensors(coordinator, async_add_entities)
             await _discover_and_add_pool_sensors(coordinator, async_add_entities)
