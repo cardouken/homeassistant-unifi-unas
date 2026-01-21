@@ -23,6 +23,7 @@ FAN_CURVE_PARAMS = [
     ("max_temp", "Max Temperature", 30, 60, 50, "°C", "mdi:thermometer-high"),
     ("min_fan", "Min Fan Speed", 0, 100, 30, "%", "mdi:fan-speed-1"),
     ("max_fan", "Max Fan Speed", 1, 100, 100, "%", "mdi:fan-speed-3"),
+    ("target_temp", "Target Temperature", 20, 50, 40, "°C", "mdi:thermometer-check"),
 ]
 
 
@@ -105,6 +106,8 @@ class UNASFanSpeedNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
                 self._current_mode = "unas_managed"
             elif payload == "auto":
                 self._current_mode = "auto"
+            elif payload == "target_temp":
+                self._current_mode = "target_temp"
             elif payload.isdigit():
                 self._current_mode = "set_speed"
             else:
@@ -145,6 +148,8 @@ class UNASFanSpeedNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
         if self._current_mode == "unas_managed":
             return "mdi:fan-off"
         elif self._current_mode == "auto":
+            return "mdi:fan-auto"
+        elif self._current_mode == "target_temp":
             return "mdi:fan-auto"
         elif self._current_mode == "set_speed":
             return "mdi:fan"
@@ -197,6 +202,8 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
         self._is_fan_param = key in ["min_fan", "max_fan"]
 
         self._mqtt_topic = f"{self._topics['control']}/fan/curve/{key}"
+        self._current_mode = None
+        self._unsubscribe_mode = None
 
         device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
         self._attr_device_info = DeviceInfo(
@@ -227,6 +234,25 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
             self.hass, self._mqtt_topic, message_received, qos=0
         )
 
+        @callback
+        def mode_message_received(msg):
+            payload = msg.payload
+            if payload == "unas_managed":
+                self._current_mode = "unas_managed"
+            elif payload == "auto":
+                self._current_mode = "auto"
+            elif payload == "target_temp":
+                self._current_mode = "target_temp"
+            elif payload.isdigit():
+                self._current_mode = "set_speed"
+            else:
+                self._current_mode = None
+            self.async_write_ha_state()
+
+        self._unsubscribe_mode = await mqtt.async_subscribe(
+            self.hass, f"{self._topics['control']}/fan/mode", mode_message_received, qos=0
+        )
+
         self.hass.loop.call_later(2.0, self._maybe_init_default)
 
     def _maybe_init_default(self) -> None:
@@ -238,6 +264,8 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe:
             self._unsubscribe()
+        if self._unsubscribe_mode:
+            self._unsubscribe_mode()
         await super().async_will_remove_from_hass()
 
     @property
@@ -245,7 +273,22 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
         mqtt_available = self.coordinator.mqtt_client.is_available()
         service_running = self.coordinator.data.get("fan_control_running", False)
         has_value = self._attr_native_value is not None
-        return mqtt_available and service_running and has_value
+
+        if not (mqtt_available and service_running and has_value):
+            return False
+
+        # Mode-specific availability
+        if self._key in ["min_temp", "max_temp"]:
+            # Only available in Custom Curve mode
+            return self._current_mode == "auto"
+        elif self._key == "target_temp":
+            # Only available in Target Temp mode
+            return self._current_mode == "target_temp"
+        elif self._key in ["min_fan", "max_fan"]:
+            # Available in both Custom Curve and Target Temp modes
+            return self._current_mode in ["auto", "target_temp"]
+
+        return True
 
     async def async_set_native_value(self, value: float) -> None:
         value = int(value)

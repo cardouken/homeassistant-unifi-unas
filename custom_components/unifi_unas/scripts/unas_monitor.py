@@ -157,10 +157,10 @@ class UNASMonitor:
         except (subprocess.SubprocessError, OSError):
             return ""
 
-    def write_max_hdd_temp(self, temp):
+    def write_hdd_temps(self, temps):
         try:
             with open(SHARED_TEMP_FILE, 'w') as f:
-                f.write(str(temp))
+                f.write(' '.join(str(t) for t in sorted(temps, reverse=True)))
         except OSError:
             pass
 
@@ -322,7 +322,6 @@ class UNASMonitor:
 
         drives = []
         current_drive_map = {}
-        max_temp = 0
         now = time.time()
 
         for device_path in Path('/dev').glob('sd?'):
@@ -347,7 +346,6 @@ class UNASMonitor:
             serial = data.get('serial_number', 'Unknown')
 
             temp = data.get('temperature', {}).get('current', 0)
-            max_temp = max(max_temp, temp)
 
             drive = {
                 'bay': bay,
@@ -421,7 +419,8 @@ class UNASMonitor:
                 del self.drive_removed_at[serial]
 
         self.previous_drive_map = current_drive_map
-        self.write_max_hdd_temp(max_temp)
+        drive_temps = [d['temperature'] for d in drives if d.get('temperature', 0) > 0]
+        self.write_hdd_temps(drive_temps if drive_temps else [0])
         return drives
 
     def get_nvme_drives(self):
