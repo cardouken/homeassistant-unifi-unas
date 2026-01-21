@@ -10,6 +10,12 @@ import asyncssh
 _LOGGER = logging.getLogger(__name__)
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
+HA_SSH_KEY_PATHS = [
+    Path("/config/.ssh/id_rsa"),       # HAOS
+    Path("/config/.ssh/id_ed25519"),   # HAOS
+    Path.home() / ".ssh" / "id_rsa",   # Core/Docker
+    Path.home() / ".ssh" / "id_ed25519",  # Core/Docker
+]
 
 class SSHManager:
     def __init__(
@@ -48,12 +54,23 @@ class SSHManager:
                 self._conn = None
 
         _LOGGER.debug("Establishing SSH connection to %s", self.host)
+
+        client_keys = None
+        if self.ssh_key:
+            client_keys = [self.ssh_key]
+        elif not self.password:
+            for key_path in HA_SSH_KEY_PATHS:
+                if key_path.exists():
+                    client_keys = [str(key_path)]
+                    _LOGGER.debug("Using SSH key from %s", key_path)
+                    break
+
         self._conn = await asyncssh.connect(
             self.host,
             port=self.port,
             username=self.username,
-            password=self.password,
-            client_keys=[self.ssh_key] if self.ssh_key else None,
+            password=self.password if self.password else None,
+            client_keys=client_keys,
             known_hosts=None,
         )
         _LOGGER.debug("SSH connection established")

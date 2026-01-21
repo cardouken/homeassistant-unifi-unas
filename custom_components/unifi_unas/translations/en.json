@@ -7,7 +7,7 @@
         "data": {
           "host": "Host (UNAS IP Address)",
           "username": "UNAS SSH username (root by default)",
-          "password": "UNAS SSH password",
+          "password": "UNAS SSH password (Leave blank if HA SSH keys are configured on the UNAS)",
           "mqtt_host": "MQTT Broker IP Address",
           "mqtt_user": "MQTT Username (required)",
           "mqtt_password": "MQTT Password (required)",
@@ -24,7 +24,7 @@
         "data": {
           "host": "Host (UNAS IP Address)",
           "username": "UNAS SSH username (root by default)",
-          "password": "UNAS SSH password",
+          "password": "UNAS SSH password (Leave blank if HA SSH keys are configured on the UNAS)",
           "mqtt_host": "MQTT Broker IP Address",
           "mqtt_user": "MQTT Username (required)",
           "mqtt_password": "MQTT Password (required)",
@@ -37,7 +37,7 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to UniFi UNAS. Please check the IP address and credentials.",
+      "cannot_connect": "Failed to connect to UniFi UNAS. Please check the IP address and password/SSH key configuration.",
       "timeout_connect": "Connection timed out. Please check that SSH is enabled on your UniFi UNAS.",
       "mqtt_cannot_connect": "Failed to connect to MQTT broker. Please verify the MQTT host IP address.",
       "mqtt_invalid_auth": "MQTT authentication failed. Please check your MQTT username and password.",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from pathlib import Path
 from typing import Any
 
 import asyncssh
@@ -32,12 +33,18 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+HA_SSH_KEY_PATHS = [
+    Path("/config/.ssh/id_rsa"),       # HAOS/Supervised
+    Path("/config/.ssh/id_ed25519"),   # HAOS/Supervised (ed25519)
+    Path.home() / ".ssh" / "id_rsa",   # Core/Docker
+    Path.home() / ".ssh" / "id_ed25519",  # Core/Docker (ed25519)
+]
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
 {
 vol.Required(CONF_HOST): str,
 vol.Required(CONF_USERNAME, default=DEFAULT_USERNAME): str,
-vol.Required(CONF_PASSWORD): str,
+vol.Optional(CONF_PASSWORD): str,
 vol.Required(CONF_MQTT_HOST): str,
 vol.Required(CONF_MQTT_USER): str,
 vol.Required(CONF_MQTT_PASSWORD): str,
@@ -73,7 +80,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if new_model != old_model:
                 errors["base"] = "model_changed"
             elif error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
-                                                   user_input[CONF_PASSWORD]):
+                                                   user_input.get(CONF_PASSWORD)):
                 errors["base"] = error_key
             elif error_key := await self._test_mqtt(user_input[CONF_MQTT_HOST], user_input[CONF_MQTT_USER],
                                                     user_input[CONF_MQTT_PASSWORD]):
@@ -87,7 +94,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_HOST, default=entry.data[CONF_HOST]): str,
                 vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, DEFAULT_USERNAME)): str,
-                vol.Required(CONF_PASSWORD, default=entry.data[CONF_PASSWORD]): str,
+                vol.Optional(CONF_PASSWORD, default=entry.data.get(CONF_PASSWORD)): str,
                 vol.Required(CONF_MQTT_HOST, default=entry.data[CONF_MQTT_HOST]): str,
                 vol.Required(CONF_MQTT_USER, default=entry.data[CONF_MQTT_USER]): str,
                 vol.Required(CONF_MQTT_PASSWORD, default=entry.data[CONF_MQTT_PASSWORD]): str,
@@ -119,7 +126,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             if error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
-                                                 user_input[CONF_PASSWORD]):
+                                                 user_input.get(CONF_PASSWORD)):
                 errors["base"] = error_key
             elif error_key := await self._test_mqtt(user_input[CONF_MQTT_HOST], user_input[CONF_MQTT_USER],
                                                     user_input[CONF_MQTT_PASSWORD]):
@@ -136,10 +143,24 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
 
-    async def _test_ssh(self, host: str, username: str, password: str) -> str | None:
+    async def _test_ssh(self, host: str, username: str, password: str | None) -> str | None:
         try:
+            client_keys = None
+            if not password:
+                for key_path in HA_SSH_KEY_PATHS:
+                    if key_path.exists():
+                        client_keys = [str(key_path)]
+                        _LOGGER.debug("Using SSH key from %s", key_path)
+                        break
+
             conn = await asyncio.wait_for(
-                asyncssh.connect(host, username=username, password=password, known_hosts=None),
+                asyncssh.connect(
+                    host,
+                    username=username,
+                    password=password if password else None,
+                    client_keys=client_keys,
+                    known_hosts=None,
+                ),
                 timeout=10.0,
             )
             result = await conn.run("echo 'test'", check=True)
