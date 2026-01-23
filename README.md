@@ -189,7 +189,8 @@ After adding, restart Home Assistant or reload template entities.
 
 3. **SSH Access to UNAS**
     - Enable SSH access in UniFi Drive via Settings → Control Plane → Console → check "SSH"
-    - Either use your UNAS SSH password when setting up the integration OR [set up SSH key authentication](#ssh-key-authentication-optional)
+    - Either use your UNAS SSH password when setting up the integration
+      OR [set up SSH key authentication](#ssh-key-authentication-optional)
 
 ### Install Integration
 
@@ -291,25 +292,25 @@ min ┤─╱
 Automatically adjusts fan speed to maintain your drives at a specific temperature. Uses a PI (Proportional-Integral)
 control algorithm that adapts to the current environment and adjusts fan speeds accordingly.
 
-Unlike Custom Curve which simply reacts to current temps, Target Temperature actively works toward a goal ramping up
-when needed and backing off when stable.
+Unlike Custom Curve which simply reacts to current temps, Target Temperature actively works toward a goal and ramps up
+when needed and backs off when stable.
 
 **Available settings:**
 
 | Setting                | Description                                                   |
 |------------------------|---------------------------------------------------------------|
-| **Target Temperature** | The temperature you want to maintain (30-50°C, default: 42°C) |
-| **Temperature Metric** | **Max** = hottest drive, **Avg** = average of all drives      |
+| **Target Temperature** | The temperature you want to maintain (20-50°C, default: 40°C) |
+| **Temperature Metric** | **Max** = hottest drive, **Average** = average of all drives  |
 | **Response Speed**     | How aggressively the controller reacts (see below)            |
 | **Min/Max Fan Speed**  | Limits for the controller (it won't go outside this range)    |
 
 **Response Speed options:**
 
-| Option         | Behavior                    | Best For                                     |
-|----------------|-----------------------------|----------------------------------------------|
-| **Relaxed**    | Slow, gentle changes        | Noise-sensitive setups, stable workloads     |
-| **Balanced**   | Moderate response (default) | Most users                                   |
-| **Aggressive** | Fast, reactive changes      | Variable workloads, maximum cooling          |
+| Option         | Behavior                    | Best For                                 |
+|----------------|-----------------------------|------------------------------------------|
+| **Relaxed**    | Slow, gentle changes        | Noise-sensitive setups, stable workloads |
+| **Balanced**   | Moderate response (default) | Most users                               |
+| **Aggressive** | Fast, reactive changes      | Variable workloads, maximum cooling      |
 
 **How it works:**
 
