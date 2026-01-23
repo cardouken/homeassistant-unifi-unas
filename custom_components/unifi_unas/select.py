@@ -134,7 +134,10 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe:
-            self._unsubscribe()
+            try:
+                self._unsubscribe()
+            except Exception as err:
+                _LOGGER.debug("Error unsubscribing from fan mode: %s", err)
         await super().async_will_remove_from_hass()
 
     @property
@@ -262,9 +265,15 @@ class UNASTempMetricSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe:
-            self._unsubscribe()
+            try:
+                self._unsubscribe()
+            except Exception as err:
+                _LOGGER.debug("Error unsubscribing from temp metric: %s", err)
         if self._unsubscribe_mode:
-            self._unsubscribe_mode()
+            try:
+                self._unsubscribe_mode()
+            except Exception as err:
+                _LOGGER.debug("Error unsubscribing from fan mode: %s", err)
         await super().async_will_remove_from_hass()
 
     @property
@@ -386,9 +395,15 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe:
-            self._unsubscribe()
+            try:
+                self._unsubscribe()
+            except Exception as err:
+                _LOGGER.debug("Error unsubscribing from response speed: %s", err)
         if self._unsubscribe_mode:
-            self._unsubscribe_mode()
+            try:
+                self._unsubscribe_mode()
+            except Exception as err:
+                _LOGGER.debug("Error unsubscribing from fan mode: %s", err)
         await super().async_will_remove_from_hass()
 
     @property

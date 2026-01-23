@@ -4,6 +4,7 @@ import time
 import subprocess
 import logging
 import json
+import fcntl
 from pathlib import Path
 import paho.mqtt.client as mqtt  # type: ignore  # installed on UNAS, not HA
 
@@ -90,11 +91,20 @@ class UNASMonitor:
         self.mqtt.on_connect = self._on_connect
         self.mqtt.on_disconnect = self._on_disconnect
         self.mqtt.on_message = self._on_message
+        self._connected = False
 
         self.mqtt.will_set(MQTT_AVAILABILITY, "offline", retain=True)
-        self.mqtt.connect(MQTT_HOST, 1883, 60)
-        self.mqtt.loop_start()
-        time.sleep(2)
+        try:
+            self.mqtt.connect(MQTT_HOST, 1883, 60)
+            self.mqtt.loop_start()
+            for _ in range(10):
+                if self._connected:
+                    break
+                time.sleep(0.5)
+            if not self._connected:
+                logger.error("MQTT connection failed - not connected after 5s")
+        except Exception as e:
+            logger.error(f"MQTT connect error: {e}")
 
         self.monitor_interval = DEFAULT_MONITOR_INTERVAL
         self.mqtt.subscribe(MONITOR_INTERVAL_TOPIC)
@@ -114,8 +124,10 @@ class UNASMonitor:
     def _on_connect(self, _client, _userdata, _flags, reason_code, _properties):
         if reason_code == 0:
             logger.info("MQTT connected")
+            self._connected = True
         else:
             logger.error(f"MQTT failed: {reason_code}")
+            self._connected = False
 
     def _on_disconnect(self, _client, _userdata, _flags, reason_code, _properties):
         if reason_code != 0:
@@ -337,11 +349,13 @@ class UNASMonitor:
 
             output = self.run_cmd(['smartctl', '-a', '-j', f'/dev/{device}'])
             if not output:
+                logger.debug(f"No smartctl output for /dev/{device}")
                 continue
 
             try:
                 data = json.loads(output)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse smartctl JSON for /dev/{device}: {e}")
                 continue
 
             if 'error' in data or not data.get('smart_status'):
@@ -436,11 +450,13 @@ class UNASMonitor:
 
             output = self.run_cmd(['smartctl', '-a', '-j', f'/dev/{device}'])
             if not output:
+                logger.debug(f"No smartctl output for /dev/{device}")
                 continue
 
             try:
                 data = json.loads(output)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to parse smartctl JSON for NVMe /dev/{device}: {e}")
                 continue
 
             if 'error' in data:

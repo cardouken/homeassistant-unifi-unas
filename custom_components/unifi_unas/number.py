@@ -162,9 +162,13 @@ class UNASFanSpeedNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
 
         pwm_value = round((value * 255) / 100)
 
-        await mqtt.async_publish(
-            self.hass, f"{self._topics['control']}/fan/mode", str(pwm_value), qos=0, retain=True
-        )
+        try:
+            await mqtt.async_publish(
+                self.hass, f"{self._topics['control']}/fan/mode", str(pwm_value), qos=0, retain=True
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to publish fan speed: %s", err)
+            return
 
         self._current_value = value
         self.async_write_ha_state()
@@ -258,7 +262,14 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
     def _maybe_init_default(self) -> None:
         if self._attr_native_value is None:
             self._attr_native_value = int(self._default)
-            self.hass.async_create_task(self._publish_to_mqtt(self._default))
+
+            async def publish_default():
+                try:
+                    await self._publish_to_mqtt(self._default)
+                except Exception as err:
+                    _LOGGER.warning("Failed to publish default value for %s: %s", self._key, err)
+
+            self.hass.async_create_task(publish_default())
             self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
@@ -314,8 +325,8 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
 
         if max_temp <= min_temp:
             raise ValueError(f"Max temperature ({max_temp}°C) must be greater than min temperature ({min_temp}°C)")
-        if max_fan < min_fan:
-            raise ValueError(f"Max fan speed ({max_fan}%) must be >= min fan speed ({min_fan}%)")
+        if max_fan <= min_fan:
+            raise ValueError(f"Max fan speed ({max_fan}%) must be greater than min fan speed ({min_fan}%)")
 
         self._attr_native_value = value
         self.async_write_ha_state()
@@ -326,6 +337,9 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
         if self._is_fan_param:
             mqtt_value = round((value * 255) / 100)
 
-        await mqtt.async_publish(
-            self.hass, self._mqtt_topic, str(int(mqtt_value)), qos=0, retain=True
-        )
+        try:
+            await mqtt.async_publish(
+                self.hass, self._mqtt_topic, str(int(mqtt_value)), qos=0, retain=True
+            )
+        except Exception as err:
+            _LOGGER.error("Failed to publish fan curve %s: %s", self._key, err)

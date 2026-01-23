@@ -58,6 +58,7 @@ class UNASMQTTClient:
         self._status: str = "unknown"
         self._last_update: datetime | None = None
         self._pending_refresh: asyncio.TimerHandle | None = None
+        self._coordinator = None
 
     async def async_subscribe(self) -> None:
         if mqtt.DOMAIN not in self.hass.data:
@@ -72,9 +73,10 @@ class UNASMQTTClient:
             _LOGGER.error("Failed to subscribe to %s/#: %s", self.mqtt_root, err)
 
     async def async_unsubscribe(self) -> None:
-        if self._pending_refresh:
-            self._pending_refresh.cancel()
-            self._pending_refresh = None
+        pending = self._pending_refresh
+        self._pending_refresh = None
+        if pending:
+            pending.cancel()
         count = len(self._subscriptions)
         for unsub in self._subscriptions:
             unsub()
@@ -82,14 +84,16 @@ class UNASMQTTClient:
         _LOGGER.debug("Unsubscribed from %d MQTT topics", count)
 
     def _schedule_refresh(self) -> None:
-        if self._pending_refresh:
-            self._pending_refresh.cancel()
-        
+        pending = self._pending_refresh
+        if pending:
+            pending.cancel()
+
         def do_refresh():
             self._pending_refresh = None
-            if hasattr(self, "_coordinator") and self._coordinator:
-                self.hass.async_create_task(self._coordinator.async_request_refresh())
-        
+            coordinator = self._coordinator
+            if coordinator is not None:
+                self.hass.async_create_task(coordinator.async_request_refresh())
+
         self._pending_refresh = self.hass.loop.call_later(REFRESH_DEBOUNCE_SECONDS, do_refresh)
 
     @callback

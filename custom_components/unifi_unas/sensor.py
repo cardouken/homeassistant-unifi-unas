@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -393,8 +394,11 @@ async def _discover_and_add_pool_sensors(
     from homeassistant.components import mqtt
     
     mqtt_data = coordinator.mqtt_client.get_data()
-    detected_pools = {key.replace("unas_pool", "").replace("_usage", "") for key in mqtt_data.keys() if
-                      key.startswith("unas_pool") and "_usage" in key}
+    pool_pattern = re.compile(r"^unas_pool(\d+)_usage$")
+    detected_pools = set()
+    for key in mqtt_data.keys():
+        if match := pool_pattern.match(key):
+            detected_pools.add(match.group(1))
 
     missing_pools = coordinator.discovered_pools - detected_pools
     if missing_pools:
