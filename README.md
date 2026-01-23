@@ -218,7 +218,7 @@ Enter details:
 
 - **Host**: UNAS IP (e.g., `192.168.1.25`)
 - **Username**: `root`
-- **Password**: Your UNAS SSH password (optional if using SSH keys)
+- **Password**: Your UNAS SSH password (optional, leave blank if using SSH keys)
 - **MQTT Host**: IP address of your MQTT broker (e.g., `192.168.1.111`, will be your HA IP if using Mosquitto add-on)
 - **MQTT User**: Your Mosquitto username (required)
 - **MQTT Password**: Your Mosquitto password (required)
