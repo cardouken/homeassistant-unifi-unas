@@ -168,14 +168,14 @@ float_compare() {
     }'
 }
 
-get_max_hdd_temp_fallback() {
-    local max=0 temp
+get_hdd_temps_fallback() {
+    local temps=""
     for dev in "${HDD_DEVICES[@]}"; do
         [ -e "/dev/$dev" ] || continue
         temp=$(timeout 5 smartctl -A "/dev/$dev" 2>/dev/null | awk '/194 Temperature_Celsius/ {print $10}' || echo 0)
-        [[ "$temp" =~ ^[0-9]+$ ]] && [ "$temp" -gt "$max" ] && max=$temp
+        [[ "$temp" =~ ^[0-9]+$ ]] && [ "$temp" -gt 0 ] && temps="$temps $temp"
     done
-    echo "$max"
+    echo "$temps" | tr ' ' '\n' | sort -rn | tr '\n' ' ' | sed 's/ *$//' | sed 's/$/:fallback/'
 }
 
 get_stale_threshold() {
@@ -197,20 +197,21 @@ get_hdd_temp_with_age() {
         if [ "$file_age" -lt "$stale_threshold" ]; then
             local temp
             temp=$(cat "$SHARED_TEMP_FILE" 2>/dev/null)
-            [ -z "$temp" ] && temp=$(get_max_hdd_temp_fallback)
+            if [ -z "$temp" ]; then
+                echo "WARNING: Shared temp file empty, polling HDD temps directly" >&2
+                get_hdd_temps_fallback
+                return
+            fi
             echo "$temp:$file_age"
             return
         else
             echo "WARNING: Shared temp file stale (${file_age}s), polling HDD temps directly" >&2
-            temp=$(get_max_hdd_temp_fallback)
-            echo "$temp:fallback"
+            get_hdd_temps_fallback
             return
         fi
     else
         echo "WARNING: Shared temp file missing, polling HDD temps directly" >&2
-        local temp
-        temp=$(get_max_hdd_temp_fallback)
-        echo "$temp:fallback"
+        get_hdd_temps_fallback
     fi
 }
 
@@ -486,8 +487,9 @@ set_fan_speed() {
 
         # if temp data is too stale (>30s), poll drives directly for PI controller
         if [ "$file_age" != "fallback" ] && [ "$file_age" -gt 30 ]; then
-            temp=$(get_max_hdd_temp_fallback)
+            temp_info=$(get_hdd_temps_fallback)
             file_age="fallback"
+            temp=$(get_temp_for_metric "$temp_info")
         fi
 
         local temp_int=${temp%.*}
