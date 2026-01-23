@@ -62,10 +62,14 @@ echo "0" > "$LAST_PWM_FILE"
 SERVICE=false
 [ "${1:-}" = "--service" ] && SERVICE=true
 
+escape_sed_replacement() {
+    printf '%s' "$1" | sed -e 's/[\\/&]/\\&/g'
+}
+
 update_state_from_mqtt() {
     local topic=$1 payload=$2
     local var_name
-    
+
     case "${topic##*/}" in
         mode)
             var_name="FAN_MODE"
@@ -102,8 +106,13 @@ update_state_from_mqtt() {
             return
             ;;
     esac
-    
-    sed -i "s/^${var_name}=.*/${var_name}=${payload}/" "$STATE_FILE"
+
+    local escaped_payload
+    escaped_payload=$(escape_sed_replacement "$payload")
+    {
+        flock -x 200
+        sed -i "s/^${var_name}=.*/${var_name}=${escaped_payload}/" "$STATE_FILE"
+    } 200>"${STATE_FILE}.lock"
 }
 
 # fetch retained MQTT messages on startup (retry up to 30 times every 2 seconds in case MQTT connection not ready yet)
@@ -187,7 +196,8 @@ get_hdd_temp_with_age() {
 
         if [ "$file_age" -lt "$stale_threshold" ]; then
             local temp
-            temp=$(cat "$SHARED_TEMP_FILE" 2>/dev/null || get_max_hdd_temp_fallback)
+            temp=$(cat "$SHARED_TEMP_FILE" 2>/dev/null)
+            [ -z "$temp" ] && temp=$(get_max_hdd_temp_fallback)
             echo "$temp:$file_age"
             return
         else

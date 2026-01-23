@@ -159,10 +159,14 @@ class UNASMonitor:
 
     def write_hdd_temps(self, temps):
         try:
-            with open(SHARED_TEMP_FILE, 'w') as f:
-                f.write(' '.join(str(t) for t in sorted(temps, reverse=True)))
-        except OSError:
-            pass
+            temp_str = ' '.join(str(t) for t in sorted(temps, reverse=True))
+            with open(f"{SHARED_TEMP_FILE}.tmp", 'w') as f:
+                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+                f.write(temp_str)
+                f.flush()
+            Path(f"{SHARED_TEMP_FILE}.tmp").rename(SHARED_TEMP_FILE)
+        except OSError as e:
+            logger.warning(f"Failed to write temp file: {e}")
 
     def get_system_metrics(self):
         data = {}
