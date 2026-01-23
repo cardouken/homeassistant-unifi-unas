@@ -94,7 +94,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             {
                 vol.Required(CONF_HOST, default=entry.data[CONF_HOST]): str,
                 vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, DEFAULT_USERNAME)): str,
-                vol.Optional(CONF_PASSWORD, default=entry.data.get(CONF_PASSWORD)): str,
+                vol.Optional(CONF_PASSWORD, default=entry.data.get(CONF_PASSWORD) or ""): str,
                 vol.Required(CONF_MQTT_HOST, default=entry.data[CONF_MQTT_HOST]): str,
                 vol.Required(CONF_MQTT_USER, default=entry.data[CONF_MQTT_USER]): str,
                 vol.Required(CONF_MQTT_PASSWORD, default=entry.data[CONF_MQTT_PASSWORD]): str,
