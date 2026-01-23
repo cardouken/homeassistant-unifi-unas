@@ -1,6 +1,15 @@
+from pathlib import Path
+
 DOMAIN = "unifi_unas"
 
 CONF_HOST = "host"
+
+HA_SSH_KEY_PATHS = [
+    Path("/config/.ssh/id_rsa"),
+    Path("/config/.ssh/id_ed25519"),
+    Path.home() / ".ssh" / "id_rsa",
+    Path.home() / ".ssh" / "id_ed25519",
+]
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 CONF_MQTT_HOST = "mqtt_host"

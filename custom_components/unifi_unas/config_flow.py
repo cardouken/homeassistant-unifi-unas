@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
 from typing import Any
 
 import asyncssh
 import voluptuous as vol
 from homeassistant.core import callback
-from homeassistant.helpers.selector import NumberSelector, NumberSelectorConfig, NumberSelectorMode, SelectSelector, \
-    SelectSelectorConfig, SelectSelectorMode
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from homeassistant import config_entries
 from homeassistant.components import mqtt
@@ -29,35 +34,32 @@ from .const import (
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
     DEVICE_MODELS,
+    HA_SSH_KEY_PATHS,
     get_mqtt_topics,
 )
 
 _LOGGER = logging.getLogger(__name__)
-HA_SSH_KEY_PATHS = [
-    Path("/config/.ssh/id_rsa"),       # HAOS/Supervised
-    Path("/config/.ssh/id_ed25519"),   # HAOS/Supervised (ed25519)
-    Path.home() / ".ssh" / "id_rsa",   # Core/Docker
-    Path.home() / ".ssh" / "id_ed25519",  # Core/Docker (ed25519)
-]
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
-{
-vol.Required(CONF_HOST): str,
-vol.Required(CONF_USERNAME, default=DEFAULT_USERNAME): str,
-vol.Optional(CONF_PASSWORD): str,
-vol.Required(CONF_MQTT_HOST): str,
-vol.Required(CONF_MQTT_USER): str,
-vol.Required(CONF_MQTT_PASSWORD): str,
-vol.Required(CONF_DEVICE_MODEL, default=DEFAULT_DEVICE_MODEL): SelectSelector(
-SelectSelectorConfig(
-options=[{"value": k, "label": v} for k, v in DEVICE_MODELS.items()],
-mode=SelectSelectorMode.DROPDOWN,
-)
-),
-vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): NumberSelector(
-NumberSelectorConfig(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX)
-),
-}
+    {
+        vol.Required(CONF_HOST): str,
+        vol.Required(CONF_USERNAME, default=DEFAULT_USERNAME): str,
+        vol.Optional(CONF_PASSWORD): str,
+        vol.Required(CONF_MQTT_HOST): str,
+        vol.Required(CONF_MQTT_USER): str,
+        vol.Required(CONF_MQTT_PASSWORD): str,
+        vol.Required(CONF_DEVICE_MODEL, default=DEFAULT_DEVICE_MODEL): SelectSelector(
+            SelectSelectorConfig(
+                options=[{"value": k, "label": v} for k, v in DEVICE_MODELS.items()],
+                mode=SelectSelectorMode.DROPDOWN,
+            )
+        ),
+        vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): NumberSelector(
+            NumberSelectorConfig(
+                min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX
+            )
+        ),
+    }
 )
 
 

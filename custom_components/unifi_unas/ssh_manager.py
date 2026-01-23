@@ -1,21 +1,20 @@
 from __future__ import annotations
 
+import asyncio
 import logging
-from pathlib import Path
+import shlex
 from typing import Optional
 
 import aiofiles
 import asyncssh
 
+from .const import HA_SSH_KEY_PATHS
+
 _LOGGER = logging.getLogger(__name__)
 
-SCRIPTS_DIR = Path(__file__).parent / "scripts"
-HA_SSH_KEY_PATHS = [
-    Path("/config/.ssh/id_rsa"),       # HAOS
-    Path("/config/.ssh/id_ed25519"),   # HAOS
-    Path.home() / ".ssh" / "id_rsa",   # Core/Docker
-    Path.home() / ".ssh" / "id_ed25519",  # Core/Docker
-]
+SCRIPTS_DIR = __import__("pathlib").Path(__file__).parent / "scripts"
+SSH_CONNECT_TIMEOUT = 30
+
 
 class SSHManager:
     def __init__(
@@ -38,52 +37,64 @@ class SSHManager:
         self.mqtt_user = mqtt_user
         self.mqtt_password = mqtt_password
         self._conn: Optional[asyncssh.SSHClientConnection] = None
+        self._lock = asyncio.Lock()
 
     async def connect(self) -> None:
-        if self._conn:
-            try:
-                await self._conn.run("true", timeout=2, check=False)
-                _LOGGER.debug("SSH connection reused")
-                return
-            except Exception:
+        async with self._lock:
+            if self._conn:
+                try:
+                    await self._conn.run("true", timeout=2, check=False)
+                    _LOGGER.debug("SSH connection reused")
+                    return
+                except asyncssh.Error:
+                    _LOGGER.debug("SSH connection stale, reconnecting")
+                except asyncio.TimeoutError:
+                    _LOGGER.debug("SSH connection timed out, reconnecting")
                 try:
                     self._conn.close()
                     await self._conn.wait_closed()
-                except Exception:
+                except asyncssh.Error:
                     pass
                 self._conn = None
 
-        _LOGGER.debug("Establishing SSH connection to %s", self.host)
+            _LOGGER.debug("Establishing SSH connection to %s", self.host)
 
-        client_keys = None
-        if self.ssh_key:
-            client_keys = [self.ssh_key]
-        elif not self.password:
-            for key_path in HA_SSH_KEY_PATHS:
-                if key_path.exists():
-                    client_keys = [str(key_path)]
-                    _LOGGER.debug("Using SSH key from %s", key_path)
-                    break
+            client_keys = None
+            if self.ssh_key:
+                client_keys = [self.ssh_key]
+            elif not self.password:
+                for key_path in HA_SSH_KEY_PATHS:
+                    if key_path.exists():
+                        client_keys = [str(key_path)]
+                        _LOGGER.debug("Using SSH key from %s", key_path)
+                        break
 
-        self._conn = await asyncssh.connect(
-            self.host,
-            port=self.port,
-            username=self.username,
-            password=self.password if self.password else None,
-            client_keys=client_keys,
-            known_hosts=None,
-        )
-        _LOGGER.debug("SSH connection established")
+            self._conn = await asyncio.wait_for(
+                asyncssh.connect(
+                    self.host,
+                    port=self.port,
+                    username=self.username,
+                    password=self.password if self.password else None,
+                    client_keys=client_keys,
+                    known_hosts=None,
+                ),
+                timeout=SSH_CONNECT_TIMEOUT,
+            )
+            _LOGGER.debug("SSH connection established")
 
     async def disconnect(self) -> None:
-        if self._conn:
-            self._conn.close()
-            await self._conn.wait_closed()
-            self._conn = None
+        async with self._lock:
+            if self._conn:
+                self._conn.close()
+                await self._conn.wait_closed()
+                self._conn = None
 
     async def execute_command(self, command: str) -> tuple[str, str]:
         await self.connect()
-        result = await self._conn.run(command, check=False)
+        async with self._lock:
+            if self._conn is None:
+                raise ConnectionError("SSH connection not established")
+            result = await self._conn.run(command, check=False)
         return result.stdout, result.stderr
 
     async def scripts_installed(self) -> bool:
@@ -95,8 +106,9 @@ class SSHManager:
         return installed
 
     async def service_running(self, service_name: str) -> bool:
+        safe_name = shlex.quote(service_name)
         stdout, _ = await self.execute_command(
-            f"systemctl is-active {service_name} 2>/dev/null || echo 'inactive'"
+            f"systemctl is-active {safe_name} 2>/dev/null || echo 'inactive'"
         )
         running = stdout.strip() == "active"
         _LOGGER.debug("Service %s running: %s", service_name, running)
@@ -165,9 +177,13 @@ class SSHManager:
             raise
 
     async def _upload_file(self, remote_path: str, content: str, executable: bool = False) -> None:
-        async with self._conn.start_sftp_client() as sftp:
-            async with sftp.open(remote_path, "w") as remote_file:
-                await remote_file.write(content)
+        async with self._lock:
+            if self._conn is None:
+                raise ConnectionError("SSH connection not established")
+            async with self._conn.start_sftp_client() as sftp:
+                async with sftp.open(remote_path, "w") as remote_file:
+                    await remote_file.write(content)
 
         if executable:
-            await self.execute_command(f"chmod +x {remote_path}")
+            safe_path = shlex.quote(remote_path)
+            await self.execute_command(f"chmod +x {safe_path}")
