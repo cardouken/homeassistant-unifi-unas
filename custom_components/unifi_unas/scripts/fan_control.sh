@@ -41,7 +41,7 @@ PI_MAX_RATE=5
 
 TEMP_HISTORY=""
 TEMP_HISTORY_SIZE=6
-LAST_TEMP_SAMPLE=0
+LAST_TEMP_FILE_MTIME=0
 
 RESPONSE_SPEED="balanced"
 
@@ -218,13 +218,17 @@ get_temp_for_metric() {
 
 update_temp_trend() {
     local current_temp=$1
-    local now
-    now=$(date +%s)
+    local file_mtime=0
 
-    if [ $((now - LAST_TEMP_SAMPLE)) -lt 10 ]; then
+    if [ -f "$SHARED_TEMP_FILE" ]; then
+        file_mtime=$(stat -c %Y "$SHARED_TEMP_FILE" 2>/dev/null || echo 0)
+    fi
+
+    # only sample when temp file has been updated (new data from monitor)
+    if [ "$file_mtime" -le "$LAST_TEMP_FILE_MTIME" ]; then
         return
     fi
-    LAST_TEMP_SAMPLE=$now
+    LAST_TEMP_FILE_MTIME=$file_mtime
 
     TEMP_HISTORY="$TEMP_HISTORY $current_temp"
     local count
@@ -395,7 +399,7 @@ set_fan_speed() {
     if [ "$FAN_MODE" = "target_temp" ] && [ "$PREV_FAN_MODE" != "target_temp" ]; then
         reset_pi_controller
         TEMP_HISTORY=""
-        LAST_TEMP_SAMPLE=0
+        LAST_TEMP_FILE_MTIME=0
 
         # warm start, calculate integral from current hardware PWM
         local current_pwm pi_max_integral_init calculated_integral=0
