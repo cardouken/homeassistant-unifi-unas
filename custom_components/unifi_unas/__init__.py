@@ -54,84 +54,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def _migrate_mqtt_topics(
-    hass: HomeAssistant, entry: ConfigEntry
-) -> None:
-    """migrate from old homeassistant/* topics to new unas/* namespace.
-    
-    added on Jan 11 2026, give users ~2mo to upgrade and remove function after that.
-    """
-    from homeassistant.components import mqtt
-    from homeassistant.loader import async_get_integration
-
-    integration = await async_get_integration(hass, DOMAIN)
-    current_version = str(integration.version)
-    migration_key = "mqtt_topic_migration_v2"
-    
-    if entry.data.get(migration_key) == current_version:
-        return
-    
-    _LOGGER.info("Migrating MQTT topics to new namespace (v%s)", current_version)
-    
-    # read current retained values from old topics to preserve settings and
-    # clear the old topics after giving monitor and fan control scripts time to restart
+def _version_at_least(stored: str | None, target: str) -> bool:
+    if stored is None:
+        return False
     try:
-        await asyncio.sleep(5)
-    except Exception as err:
-        _LOGGER.warning("Error during migration delay: %s", err)
-    
-    old_topics_to_clear = [
-        "homeassistant/unas/status",
-        "homeassistant/unas/fan_mode",
-        "homeassistant/unas/monitor_interval",
-        "homeassistant/unas/fan_curve/min_temp",
-        "homeassistant/unas/fan_curve/max_temp",
-        "homeassistant/unas/fan_curve/min_fan",
-        "homeassistant/unas/fan_curve/max_fan",
-    ]
-    
-    # system sensors
-    system_metrics = [
-        "uptime", "os_version", "drive_version", "cpu_usage", "disk_read", "disk_write",
-        "memory_total", "memory_used", "memory_usage", "cpu_temp", "fan_speed",
-        "fan_speed_percent", "cpu", "smb_connections", "nfs_mounts"
-    ]
-    for metric in system_metrics:
-        old_topics_to_clear.append(f"homeassistant/sensor/unas_{metric}/state")
-        old_topics_to_clear.append(f"homeassistant/sensor/unas_{metric}/attributes")
-    
-    # pool sensors
-    for i in range(1, 6):
-        for metric in ["usage", "size", "used", "available"]:
-            old_topics_to_clear.append(f"homeassistant/sensor/unas_pool{i}_{metric}/state")
-    
-    # HDD sensors
-    for bay in range(1, 9):
-        for metric in ["temperature", "model", "serial", "rpm", "firmware", "status", 
-                      "total_size", "power_on_hours", "bad_sectors"]:
-            old_topics_to_clear.append(f"homeassistant/sensor/unas_hdd_{bay}_{metric}/state")
-    
-    # NVMe sensors
-    for slot in range(0, 3):
-        for metric in ["temperature", "model", "serial", "firmware", "status", 
-                      "total_size", "power_on_hours", "percentage_used", "available_spare",
-                      "media_errors", "unsafe_shutdowns"]:
-            old_topics_to_clear.append(f"homeassistant/sensor/unas_nvme_{slot}_{metric}/state")
-    
-    cleared_count = 0
-    for topic in old_topics_to_clear:
-        try:
-            await mqtt.async_publish(hass, topic, "", qos=0, retain=True)
-            cleared_count += 1
-        except Exception as err:
-            _LOGGER.debug("Failed to clear old topic %s: %s", topic, err)
-    
-    _LOGGER.info("Cleared %d old MQTT state topics", cleared_count)
-    
-    # mark migration as complete
-    new_data = dict(entry.data)
-    new_data[migration_key] = current_version
-    hass.config_entries.async_update_entry(entry, data=new_data)
+        return Version(stored.replace("-dev", "")) >= Version(target.replace("-dev", ""))
+    except InvalidVersion:
+        return stored == target
 
 
 async def _cleanup_old_mqtt_configs_on_upgrade(
@@ -261,8 +190,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await mqtt_client_instance.async_subscribe()
     await _cleanup_old_mqtt_configs_on_upgrade(hass, entry)
-    
-    from homeassistant.components import mqtt
+
     topics = get_mqtt_topics(entry.entry_id)
     scan_interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
     await mqtt.async_publish(
@@ -272,8 +200,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         qos=0,
         retain=True,
     )
-    
-    await _migrate_mqtt_topics(hass, entry)
 
     return True
 
