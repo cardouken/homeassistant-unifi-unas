@@ -44,7 +44,7 @@ class UNASReinstallScriptsButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.mqtt_client.is_available()
+        return self.coordinator.last_update_success and self.coordinator.data.get("ssh_connected", False)
 
     async def async_press(self) -> None:
         await self.coordinator.async_reinstall_scripts()
@@ -67,7 +67,7 @@ class UNASRebootButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        return self.coordinator.last_update_success and self.coordinator.data.get("ssh_connected", False)
 
     async def async_press(self) -> None:
         await self.coordinator.ssh_manager.execute_command("reboot")
@@ -90,7 +90,7 @@ class UNASShutdownButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success
+        return self.coordinator.last_update_success and self.coordinator.data.get("ssh_connected", False)
 
     async def async_press(self) -> None:
         await self.coordinator.ssh_manager.execute_command("shutdown -h now")

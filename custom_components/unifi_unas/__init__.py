@@ -4,10 +4,14 @@ import asyncio
 import logging
 from datetime import timedelta
 
+from packaging.version import Version, InvalidVersion
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.components import mqtt
+from homeassistant.helpers import issue_registry as ir
 
 from .const import (
     DOMAIN,
@@ -47,10 +51,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if CONF_DEVICE_MODEL not in new_data:
             new_data[CONF_DEVICE_MODEL] = DEFAULT_DEVICE_MODEL
             _LOGGER.info("Migrated config entry to version 2, added device model: %s", DEFAULT_DEVICE_MODEL)
-        
+
         hass.config_entries.async_update_entry(entry, data=new_data, version=2)
         return True
-    
+
     return True
 
 
@@ -75,7 +79,7 @@ async def _cleanup_old_mqtt_configs_on_upgrade(
     current_version = str(integration.version)
     last_cleanup_version = entry.data.get(LAST_CLEANUP_VERSION_KEY)
 
-    if last_cleanup_version == current_version:
+    if _version_at_least(last_cleanup_version, current_version):
         return
 
     _LOGGER.info(
@@ -83,8 +87,6 @@ async def _cleanup_old_mqtt_configs_on_upgrade(
         last_cleanup_version or "unknown",
         current_version,
     )
-
-    from homeassistant.components import mqtt
 
     topics_to_clear = [
         "unas_uptime",
@@ -217,7 +219,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await manager.execute_command("systemctl disable fan_control || true")
             await manager.execute_command("rm -f /etc/systemd/system/unas_monitor.service")
             await manager.execute_command("rm -f /etc/systemd/system/fan_control.service")
-            await manager.execute_command("rm -f /root/unas_monitor.sh")
             await manager.execute_command("rm -f /root/unas_monitor.py")
             await manager.execute_command("rm -f /root/fan_control.sh")
             await manager.execute_command("rm -f /tmp/fan_control_last_pwm")
@@ -262,11 +263,8 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
     async def _async_update_data(self):
-        from homeassistant.components import mqtt
-
         if mqtt.DOMAIN not in self.hass.data:
             _LOGGER.error("MQTT integration removed - UNAS Pro requires MQTT")
-            from homeassistant.helpers import issue_registry as ir
             ir.async_create_issue(
                 self.hass,
                 DOMAIN,
@@ -304,16 +302,18 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
                 "fan_control_running": fan_control_running,
             })
 
-            if hasattr(self, "sensor_add_entities") and hasattr(self, "discovered_bays"):
-                from .sensor import _discover_and_add_drive_sensors, _discover_and_add_nvme_sensors, _discover_and_add_pool_sensors
+            if self.sensor_add_entities is not None:
+                from .sensor import (
+                    _discover_and_add_drive_sensors,
+                    _discover_and_add_nvme_sensors,
+                    _discover_and_add_pool_sensors,
+                )
                 await _discover_and_add_drive_sensors(self, self.sensor_add_entities)
                 await _discover_and_add_nvme_sensors(self, self.sensor_add_entities)
                 await _discover_and_add_pool_sensors(self, self.sensor_add_entities)
 
         except Exception as err:
             _LOGGER.warning("SSH connection temporarily unavailable: %s", err)
-        finally:
-            await self.ssh_manager.disconnect()
 
         return data
 

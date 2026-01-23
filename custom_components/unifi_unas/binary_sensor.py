@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -40,6 +40,10 @@ class UNASScriptsInstalledSensor(CoordinatorEntity, BinarySensorEntity):
             model=device_model,
         )
 
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
     @property
     def is_on(self) -> bool:
         return self.coordinator.data.get("scripts_installed", False)
@@ -60,6 +64,10 @@ class UNASMonitorRunningSensor(CoordinatorEntity, BinarySensorEntity):
             model=device_model,
         )
 
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
+
     @property
     def is_on(self) -> bool:
         return self.coordinator.data.get("monitor_running", False)
@@ -79,6 +87,10 @@ class UNASFanControlRunningSensor(CoordinatorEntity, BinarySensorEntity):
             manufacturer="Ubiquiti",
             model=device_model,
         )
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
 
     @property
     def is_on(self) -> bool:

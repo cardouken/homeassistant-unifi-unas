@@ -332,6 +332,10 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
         await self._publish_to_mqtt(value)
 
+    @property
+    def entity_registry_enabled_default(self) -> bool:
+        return True
+
     async def _publish_to_mqtt(self, value: float) -> None:
         mqtt_value = value
         if self._is_fan_param:
