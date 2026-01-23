@@ -30,7 +30,6 @@ PI_LAST_PWM=0
 PI_LAST_TIME=0
 PI_RESULT=0
 PI_TREND_MULT="1.0"
-TREND_RESULT="1.0"
 PREV_FAN_MODE=""
 PREV_TARGET_TEMP=""
 
@@ -147,6 +146,17 @@ cleanup() {
 }
 trap cleanup EXIT TERM INT
 
+float_compare() {
+    awk -v a="$1" -v op="$2" -v b="$3" 'BEGIN {
+        if (op == ">") exit !(a > b)
+        if (op == "<") exit !(a < b)
+        if (op == ">=") exit !(a >= b)
+        if (op == "<=") exit !(a <= b)
+        if (op == "==") exit !(a == b)
+        exit 1
+    }'
+}
+
 get_max_hdd_temp_fallback() {
     local max=0 temp
     for dev in "${HDD_DEVICES[@]}"; do
@@ -227,14 +237,14 @@ update_temp_trend() {
     newest=$(echo $TEMP_HISTORY | awk '{print $NF}')
     diff=$(awk -v n="$newest" -v o="$oldest" 'BEGIN {printf "%.1f", n - o}')
 
-    if awk -v d="$diff" 'BEGIN {exit !(d <= -1.5)}'; then
-        TREND_RESULT="0"
-    elif awk -v d="$diff" 'BEGIN {exit !(d < 0)}'; then
-        TREND_RESULT="0.2"
-    elif awk -v d="$diff" 'BEGIN {exit !(d > -0.3 && d < 0.3)}'; then
-        TREND_RESULT="1.0"
+    if float_compare "$diff" "<=" -1.5; then
+        PI_TREND_MULT="0"
+    elif float_compare "$diff" "<" 0; then
+        PI_TREND_MULT="0.2"
+    elif float_compare "$diff" "<" 0.3; then
+        PI_TREND_MULT="1.0"
     else
-        TREND_RESULT="1.5"
+        PI_TREND_MULT="1.5"
     fi
 }
 
@@ -260,7 +270,7 @@ calculate_target_temp_pwm() {
     local pi_max_integral=$((max_fan - min_fan))
     local now error p_term new_integral new_pwm baseline dt
 
-    if awk -v t="$current_temp" 'BEGIN {exit !(t == 0)}'; then
+    if float_compare "$current_temp" "==" 0; then
         PI_RESULT=$min_fan
         return
     fi
@@ -282,11 +292,11 @@ calculate_target_temp_pwm() {
 
     local trend_mult speed_mult final_mult
     update_temp_trend "$current_temp"
-    trend_mult=$TREND_RESULT
+    trend_mult=$PI_TREND_MULT
     speed_mult=$(get_response_multiplier)
 
     # only apply trend/speed multipliers when above target; normal decay rate at/below target
-    if awk -v e="$error" 'BEGIN {exit !(e > 0)}'; then
+    if float_compare "$error" ">" 0; then
         final_mult=$(awk -v t="$trend_mult" -v s="$speed_mult" 'BEGIN {printf "%.2f", t * s}')
     else
         final_mult="1.0"
@@ -294,7 +304,7 @@ calculate_target_temp_pwm() {
     PI_TREND_MULT=$trend_mult
 
     # anti-windup
-    if [ "$PI_LAST_PWM" -ge "$max_fan" ] && awk -v e="$error" 'BEGIN {exit !(e > 0)}'; then
+    if [ "$PI_LAST_PWM" -ge "$max_fan" ] && float_compare "$error" ">" 0; then
         new_integral=$PI_INTEGRAL
     else
         new_integral=$(awk -v i="$PI_INTEGRAL" -v e="$error" -v ki="$PI_KI" -v dt="$dt" -v max="$pi_max_integral" -v mult="$final_mult" \
@@ -437,7 +447,7 @@ set_fan_speed() {
         temp_info=$(get_hdd_temp_with_age)
         file_age="${temp_info##*:}"
         temp=$(get_temp_for_metric "$temp_info")
-        temp_int=${temp%.*}
+        local temp_int=${temp%.*}
         metric_label="max"
         [ "$TEMP_METRIC" = "avg" ] && metric_label="avg"
 
@@ -453,9 +463,9 @@ set_fan_speed() {
             local error
             error=$(awk -v t="$temp" -v target="$TARGET_TEMP" 'BEGIN {printf "%.1f", t - target}')
             local status="at target"
-            if awk -v e="$error" 'BEGIN {exit !(e > 0)}'; then
+            if float_compare "$error" ">" 0; then
                 status="cooling (+${error}°C)"
-            elif awk -v e="$error" 'BEGIN {exit !(e < 0)}'; then
+            elif float_compare "$error" "<" 0; then
                 status="warm up (${error}°C)"
             fi
 
