@@ -25,9 +25,9 @@ MODE_TARGET_TEMP = "Target Temp"
 TEMP_METRIC_MAX = "Max (Hottest)"
 TEMP_METRIC_AVG = "Average"
 
-RESPONSE_GRADUAL = "Gradual"
+RESPONSE_RELAXED = "Relaxed"
 RESPONSE_BALANCED = "Balanced"
-RESPONSE_RESPONSIVE = "Responsive"
+RESPONSE_AGGRESSIVE = "Aggressive"
 
 
 async def async_setup_entry(
@@ -295,7 +295,7 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         self._current_mode = None
         self._unsubscribe_mode = None
 
-        self._attr_options = [RESPONSE_GRADUAL, RESPONSE_BALANCED, RESPONSE_RESPONSIVE]
+        self._attr_options = [RESPONSE_RELAXED, RESPONSE_BALANCED, RESPONSE_AGGRESSIVE]
 
         device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
         self._attr_device_info = DeviceInfo(
@@ -321,10 +321,10 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         def message_received(msg):
             payload = msg.payload
 
-            if payload == "gradual":
-                self._current_option = RESPONSE_GRADUAL
-            elif payload == "responsive":
-                self._current_option = RESPONSE_RESPONSIVE
+            if payload == "relaxed":
+                self._current_option = RESPONSE_RELAXED
+            elif payload == "aggressive":
+                self._current_option = RESPONSE_AGGRESSIVE
             else:
                 self._current_option = RESPONSE_BALANCED
 
@@ -354,10 +354,10 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         )
 
     def _option_to_mqtt(self, option: str) -> str:
-        if option == RESPONSE_GRADUAL:
-            return "gradual"
-        elif option == RESPONSE_RESPONSIVE:
-            return "responsive"
+        if option == RESPONSE_RELAXED:
+            return "relaxed"
+        elif option == RESPONSE_AGGRESSIVE:
+            return "aggressive"
         return "balanced"
 
     async def _publish_speed(self, speed: str) -> None:

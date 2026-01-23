@@ -17,7 +17,6 @@ LAST_PWM_FILE="/tmp/fan_control_last_pwm"
 SHARED_TEMP_FILE="/tmp/unas_hdd_temp"
 MONITOR_INTERVAL_FILE="/tmp/unas_monitor_interval"
 
-# Default values
 FAN_MODE="unas_managed"
 MIN_TEMP=40
 MAX_TEMP=50
@@ -39,7 +38,6 @@ PI_KP=10
 PI_KI=0.05
 PI_MAX_RATE=5
 
-# temperature trend tracking for auto-adapting
 TEMP_HISTORY=""
 TEMP_HISTORY_SIZE=6
 LAST_TEMP_SAMPLE=0
@@ -96,7 +94,7 @@ update_state_from_mqtt() {
             var_name="TEMP_METRIC"
             ;;
         response_speed)
-            [[ "$payload" =~ ^(gradual|balanced|responsive)$ ]] || return
+            [[ "$payload" =~ ^(relaxed|balanced|aggressive)$ ]] || return
             var_name="RESPONSE_SPEED"
             ;;
         *)
@@ -107,7 +105,7 @@ update_state_from_mqtt() {
     sed -i "s/^${var_name}=.*/${var_name}=${payload}/" "$STATE_FILE"
 }
 
-# Fetch retained MQTT messages on startup (retry up to 30 times every 2 seconds in case MQTT connection not ready yet)
+# fetch retained MQTT messages on startup (retry up to 30 times every 2 seconds in case MQTT connection not ready yet)
 echo "Fetching MQTT state..."
 MQTT_OUTPUT=""
 for i in {1..30}; do
@@ -135,7 +133,7 @@ fi
 
 cat "$STATE_FILE"
 
-# Start persistent MQTT subscription for updates
+# start persistent MQTT subscription for updates
 mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
     -t "${MQTT_FAN}/mode" \
     -t "${MQTT_FAN}/curve/+" \
@@ -242,9 +240,9 @@ update_temp_trend() {
 
 get_response_multiplier() {
     case "$RESPONSE_SPEED" in
-        gradual)    echo "0.5" ;;
+        relaxed)    echo "0.5" ;;
         balanced)   echo "1.0" ;;
-        responsive) echo "2.0" ;;
+        aggressive) echo "2.0" ;;
         *)          echo "1.0" ;;
     esac
 }
@@ -361,13 +359,13 @@ set_fan_speed() {
     # shellcheck source=/dev/null
     source "$STATE_FILE"
 
-    # Detect target temperature change and reduce integral if now below target
+    # detect target temperature change and reduce integral if now below target
     if [ -n "$PREV_TARGET_TEMP" ] && [ "$TARGET_TEMP" != "$PREV_TARGET_TEMP" ]; then
         local current_temp_int
         current_temp_int=$(get_temp_for_metric "$(get_hdd_temp_with_age)")
         current_temp_int=${current_temp_int%.*}
         if [ "$current_temp_int" -lt "$TARGET_TEMP" ]; then
-            # Now below new target - reduce integral to 25%
+            # below new target - reduce integral to 25%
             PI_INTEGRAL=$(awk -v i="$PI_INTEGRAL" 'BEGIN {printf "%.2f", i * 0.25}')
             echo "TARGET CHANGE: ${PREV_TARGET_TEMP}°C → ${TARGET_TEMP}°C, now below target, integral reduced: I:$PI_INTEGRAL"
         fi
@@ -381,7 +379,7 @@ set_fan_speed() {
         TEMP_HISTORY=""
         LAST_TEMP_SAMPLE=0
 
-        # Warm start from current PWM, accounting for expected P-term
+        # warm start from current PWM
         local current_pwm pi_max_integral_init
         current_pwm=$(cat /sys/class/hwmon/hwmon0/pwm1 2>/dev/null || echo 0)
         pi_max_integral_init=$((MAX_FAN - MIN_FAN))
@@ -404,9 +402,9 @@ set_fan_speed() {
         temp_info=$(get_hdd_temp_with_age)
         temps="${temp_info%%:*}"
         file_age="${temp_info##*:}"
-        max_temp="${temps%% *}"  # First temp (sorted descending)
+        max_temp="${temps%% *}"  # first temp (sorted descending)
 
-        # Calculate average and count drives
+        # calculate average and count drives
         avg_temp=$(echo "$temps" | awk '{sum=0; for(i=1;i<=NF;i++) sum+=$i; printf "%.1f", sum/NF}')
         drive_count=$(echo "$temps" | wc -w)
 
@@ -422,7 +420,7 @@ set_fan_speed() {
         local temp_info temps temp file_age
         temp_info=$(get_hdd_temp_with_age)
         temps="${temp_info%%:*}"
-        temp="${temps%% *}"  # Get first (max) temperature
+        temp="${temps%% *}"  # get first (max) temperature
         file_age="${temp_info##*:}"
 
         pwm=$(calculate_pwm "$temp" "$MIN_TEMP" "$MAX_TEMP" "$MIN_FAN" "$MAX_FAN")
