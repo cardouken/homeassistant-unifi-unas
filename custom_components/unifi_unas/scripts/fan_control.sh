@@ -32,6 +32,8 @@ PI_RESULT=0
 PI_TREND_MULT="1.0"
 PREV_FAN_MODE=""
 PREV_TARGET_TEMP=""
+SAVED_PI_INTEGRAL=""
+SAVED_PI_TIME=0
 
 PI_KP=10
 PI_KI=0.05
@@ -384,15 +386,22 @@ set_fan_speed() {
 
     local pwm
 
+    # save PI state when leaving target_temp mode
+    if [ "$PREV_FAN_MODE" = "target_temp" ] && [ "$FAN_MODE" != "target_temp" ]; then
+        SAVED_PI_INTEGRAL=$PI_INTEGRAL
+        SAVED_PI_TIME=$(date +%s)
+    fi
+
     if [ "$FAN_MODE" = "target_temp" ] && [ "$PREV_FAN_MODE" != "target_temp" ]; then
         reset_pi_controller
         TEMP_HISTORY=""
         LAST_TEMP_SAMPLE=0
 
-        # warm start from current PWM
-        local current_pwm pi_max_integral_init
+        # warm start, calculate integral from current hardware PWM
+        local current_pwm pi_max_integral_init calculated_integral=0
         current_pwm=$(cat /sys/class/hwmon/hwmon0/pwm1 2>/dev/null || echo 0)
         pi_max_integral_init=$((MAX_FAN - MIN_FAN))
+
         if [ "$current_pwm" -gt "$MIN_FAN" ]; then
             local current_temp_int temp_info expected_p_term
             temp_info=$(get_hdd_temp_with_age)
@@ -400,10 +409,23 @@ set_fan_speed() {
             current_temp_int=${current_temp_int%.*}
             expected_p_term=$(( (current_temp_int - TARGET_TEMP) * PI_KP ))
             [ "$expected_p_term" -lt 0 ] && expected_p_term=0
-            local estimated_integral=$((current_pwm - MIN_FAN - expected_p_term))
-            [ "$estimated_integral" -gt "$pi_max_integral_init" ] && estimated_integral=$pi_max_integral_init
-            [ "$estimated_integral" -gt 0 ] && PI_INTEGRAL=$estimated_integral
+            calculated_integral=$((current_pwm - MIN_FAN - expected_p_term))
+            [ "$calculated_integral" -lt 0 ] && calculated_integral=0
+            [ "$calculated_integral" -gt "$pi_max_integral_init" ] && calculated_integral=$pi_max_integral_init
         fi
+
+        # restore saved integral if changed back to PI mode within 3 minutes, otherwise use warm start
+        local now elapsed
+        now=$(date +%s)
+        elapsed=$((now - SAVED_PI_TIME))
+        if [ -n "$SAVED_PI_INTEGRAL" ] && [ "$elapsed" -lt 300 ]; then
+            PI_INTEGRAL=$SAVED_PI_INTEGRAL
+            echo "MODE SWITCH: Restored saved integral ($SAVED_PI_INTEGRAL) after ${elapsed}s, calculated was ($calculated_integral)"
+        else
+            [ "$calculated_integral" -gt 0 ] && PI_INTEGRAL=$calculated_integral
+            [ -n "$SAVED_PI_INTEGRAL" ] && echo "MODE SWITCH: Saved integral expired (${elapsed}s), using calculated ($calculated_integral)"
+        fi
+        SAVED_PI_INTEGRAL=""
     fi
     PREV_FAN_MODE="$FAN_MODE"
 
