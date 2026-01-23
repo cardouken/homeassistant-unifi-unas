@@ -483,6 +483,13 @@ set_fan_speed() {
         temp_info=$(get_hdd_temp_with_age)
         file_age="${temp_info##*:}"
         temp=$(get_temp_for_metric "$temp_info")
+
+        # if temp data is too stale (>30s), poll drives directly for PI controller
+        if [ "$file_age" != "fallback" ] && [ "$file_age" -gt 30 ]; then
+            temp=$(get_max_hdd_temp_fallback)
+            file_age="fallback"
+        fi
+
         local temp_int=${temp%.*}
         metric_label="max"
         [ "$TEMP_METRIC" = "avg" ] && metric_label="avg"
