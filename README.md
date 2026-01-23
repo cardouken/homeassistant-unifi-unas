@@ -44,8 +44,10 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
 - **UNAS 2** – Unconfirmed
 - **UNVR** – Unofficial support (see note below)
 
-> **UNVR Note:** The UNVR is not a UNAS device, but this integration has been confirmed to work with it in [#11](https://github.com/cardouken/homeassistant-unifi-unas/issues/11). Support is unofficial and may have
-> limitations, and not all current or future features may work in future releases. The integration will show UniFi Protect version instead of UniFi Drive version and will prefix entities
+> **UNVR Note:** The UNVR is not a UNAS device, but this integration has been confirmed to work with it
+> in [#11](https://github.com/cardouken/homeassistant-unifi-unas/issues/11). Support is unofficial and may have
+> limitations, and not all current or future features may work in future releases. The integration will show UniFi
+> Protect version instead of UniFi Drive version and will prefix entities
 > with `unvr_` instead of `unas_`.
 >
 > During setup, just use your UNVR IP and credentials.
@@ -104,9 +106,15 @@ improve device support!
 
 ### Controls
 
-- **Fan Mode** (Select) - UNAS Managed / Custom Curve / Set Speed
-- **Fan Speed** (Number) - Manual speed control, 0-100% (only in "Set Speed" mode)
-- **Fan Curve Parameters** (Numbers) - Min/max temperature (20-60°C), min/max fan speed (0-100%)
+- **Fan Mode** (Select) - UNAS Managed, Custom Curve, Target Temperature, or Set Speed
+- **Target Temperature** (Number) - Desired drive temperature for Target Temperature mode (30-50°C)
+- **Temperature Metric** (Select) - Max (hottest drive) or Avg (average) for Target Temperature mode
+- **Response Speed** (Select) - Relaxed, Balanced, or Aggressive for Target Temperature mode
+- **Fan Speed** (Number) - Manual speed for Set Speed mode (0-100%)
+- **Min/Max Temperature** (Numbers) - Temperature range for Custom Curve and Target Temperature modes (20-60°C)
+- **Min/Max Fan Speed** (Numbers) - Fan speed range/limits (0-100%)
+
+> **Note:** Controls are context-sensitive—only settings relevant to your selected fan mode are adjustable.
 
 ### Buttons
 
@@ -119,11 +127,14 @@ improve device support!
 <details>
 <summary><strong>Dashboard Card YAML</strong></summary>
 
-The YAML for this dashboard card is included in [`card.yaml`](card.yaml). Credit to [/u/Imaginary_Explorer99 on Reddit](https://www.reddit.com/r/synology/comments/1gwpq15/home_assistant_synology_integration_dashboard/lyazspd/) for the original concept.
+The YAML for this dashboard card is included in [`card.yaml`](card.yaml). Credit
+to [/u/Imaginary_Explorer99 on Reddit](https://www.reddit.com/r/synology/comments/1gwpq15/home_assistant_synology_integration_dashboard/lyazspd/)
+for the original concept.
 
 **Prerequisites:**
 
 The card uses the following custom cards from HACS:
+
 - [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom)
 - [card-mod](https://github.com/thomasloven/lovelace-card-mod)
 
@@ -138,7 +149,8 @@ The card uses the following custom cards from HACS:
 
 **Average Drive Temperature Sensor:**
 
-The card includes an average drive temperature sensor that isn't part of the integration. To use it, add this template sensor to your `configuration.yaml`:
+The card includes an average drive temperature sensor that isn't part of the integration. To use it, add this template
+sensor to your `configuration.yaml`:
 
 ```yaml
 template:
@@ -172,10 +184,12 @@ After adding, restart Home Assistant or reload template entities.
     - Settings → Add-ons → Add-on Store → Mosquitto broker
     - Install, start, and enable "Start on boot"
     - Configure login credentials under Mosquitto broker add-on → Configuration → Options → Logins
-    - **Note**: You can use any MQTT broker, but Mosquitto add-on is easiest. Authentication (username/password) is required.
+    - **Note**: You can use any MQTT broker, but Mosquitto add-on is easiest. Authentication (username/password) is
+      required.
 
 3. **SSH Access to UNAS**
-    - Enable SSH access in UniFi Drive via Settings → Control Plane → Console → check "SSH" and configure password
+    - Enable SSH access in UniFi Drive via Settings → Control Plane → Console → check "SSH"
+    - Either use your UNAS SSH password when setting up the integration OR [set up SSH key authentication](#ssh-key-authentication-optional)
 
 ### Install Integration
 
@@ -203,7 +217,7 @@ Enter details:
 
 - **Host**: UNAS IP (e.g., `192.168.1.25`)
 - **Username**: `root`
-- **Password**: Your UNAS SSH password
+- **Password**: Your UNAS SSH password (optional if using SSH keys)
 - **MQTT Host**: IP address of your MQTT broker (e.g., `192.168.1.111`, will be your HA IP if using Mosquitto add-on)
 - **MQTT User**: Your Mosquitto username (required)
 - **MQTT Password**: Your Mosquitto password (required)
@@ -216,6 +230,30 @@ The integration will automatically:
 - Configure systemd services
 - Set up MQTT auto-discovery
 - Create all devices and entities
+
+### SSH Key Authentication (Optional)
+
+Instead of using a password, you can configure SSH key authentication for more secure, passwordless connections.
+
+**Setup:**
+
+1. Generate an SSH key pair (if you don't have one):
+   ```bash
+   ssh-keygen -t ed25519
+   ```
+
+2. Copy the public key to your UNAS:
+   ```bash
+   ssh-copy-id root@YOUR_UNAS_IP
+   ```
+
+3. Place the private key where Home Assistant can find it:
+    - **HAOS/Supervised**: `/config/.ssh/id_ed25519` or `/config/.ssh/id_rsa`
+    - **Core/Docker**: `~/.ssh/id_ed25519` or `~/.ssh/id_rsa`
+
+4. Leave the password field empty during integration setup.
+
+The integration will automatically detect and use the SSH key.
 
 ## Fan Control Modes
 
@@ -248,7 +286,49 @@ min ┤─╱
 | Balanced   | 38°C     | 48°C     | 30%     | 70%     |
 | Aggressive | 35°C     | 45°C     | 70%     | 100%    |
 
-### 3. Set Speed
+### 3. Target Temperature
+
+Automatically adjusts fan speed to maintain your drives at a specific temperature. Uses a PI (Proportional-Integral)
+control algorithm that adapts to the current environment and adjusts fan speeds accordingly.
+
+Unlike Custom Curve which simply reacts to current temps, Target Temperature actively works toward a goal ramping up
+when needed and backing off when stable.
+
+**Available settings:**
+
+| Setting                | Description                                                   |
+|------------------------|---------------------------------------------------------------|
+| **Target Temperature** | The temperature you want to maintain (30-50°C, default: 42°C) |
+| **Temperature Metric** | **Max** = hottest drive, **Avg** = average of all drives      |
+| **Response Speed**     | How aggressively the controller reacts (see below)            |
+| **Min/Max Fan Speed**  | Limits for the controller (it won't go outside this range)    |
+
+**Response Speed options:**
+
+| Option         | Behavior                    | Best For                                     |
+|----------------|-----------------------------|----------------------------------------------|
+| **Relaxed**    | Slow, gentle changes        | Noise-sensitive setups, stable workloads     |
+| **Balanced**   | Moderate response (default) | Most users                                   |
+| **Aggressive** | Fast, reactive changes      | Variable workloads, maximum cooling          |
+
+**How it works:**
+
+- Above target → Fans ramp up (faster when further from target)
+- At target → Fans hold steady
+- Below target → Fans gradually reduce
+
+The controller includes safeguards (rate limiting, anti-windup, warm start for smooth transitions, integral and output
+clamping) against oscillation and overshooting. It typically reaches steady-state within 15-30 minutes of a target
+change, depending on your environment and targets.
+
+**When to use Target Temperature:**
+
+- You want "set and forget" temperature control
+- Your workload/environment varies (the controller adapts automatically)
+- You care more about a specific temperature than fan speeds (reasonable temp targets will still find the lowest fan
+  speed)
+
+### 4. Set Speed
 
 Lock fans to a fixed speed (0-100%). Use the Fan Speed slider to set the desired speed.
 
