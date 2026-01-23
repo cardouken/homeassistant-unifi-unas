@@ -10,7 +10,7 @@ MQTT_SYSTEM="${MQTT_ROOT}/system"
 MQTT_CONTROL="${MQTT_ROOT}/control"
 MQTT_FAN="${MQTT_CONTROL}/fan"
 
-HDD_DEVICES=(sda sdb sdc sdd sde sdf sdg)
+HDD_DEVICES=(sda sdb sdc sdd sde sdf sdg sdh)
 
 STATE_FILE="/tmp/fan_control_state"
 LAST_PWM_FILE="/tmp/fan_control_last_pwm"
