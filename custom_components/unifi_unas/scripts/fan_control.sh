@@ -490,7 +490,7 @@ set_fan_speed() {
         if [ "$temp_int" -eq 0 ]; then
             pwm=$MIN_FAN
             set_pwm "$pwm"
-            echo "TARGET TEMP MODE: No drives detected, using min fan ($((pwm * 100 / 255))%)"
+            echo "TARGET TEMP MODE [$RESPONSE_SPEED]: No drives detected, using min fan ($((pwm * 100 / 255))%)"
         else
             calculate_target_temp_pwm "$temp" "$TARGET_TEMP" "$MIN_FAN" "$MAX_FAN"
             pwm=$PI_RESULT
@@ -506,9 +506,9 @@ set_fan_speed() {
             fi
 
             if [ "$file_age" = "fallback" ]; then
-                echo "TARGET TEMP MODE: ${temp}°C ($metric_label) → ${TARGET_TEMP}°C target ($status) → $pwm PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($((pwm * 100 / 255))%)"
+                echo "TARGET TEMP MODE [$RESPONSE_SPEED]: ${temp}°C ($metric_label) → ${TARGET_TEMP}°C target ($status) → $pwm PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($((pwm * 100 / 255))%)"
             else
-                echo "TARGET TEMP MODE: ${temp}°C ($metric_label, $(printf "%2s" "$file_age")s old) → ${TARGET_TEMP}°C target ($status) → $pwm PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($((pwm * 100 / 255))%)"
+                echo "TARGET TEMP MODE [$RESPONSE_SPEED]: ${temp}°C ($metric_label, $(printf "%2s" "$file_age")s old) → ${TARGET_TEMP}°C target ($status) → $pwm PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($((pwm * 100 / 255))%)"
             fi
         fi
 
