@@ -2,6 +2,22 @@
 
 set -euo pipefail
 
+# =============================================================================
+# Constants
+# =============================================================================
+
+readonly HDD_DEVICES=(sda sdb sdc sdd sde sdf sdg sdh)
+readonly TREND_FALLING_FAST=-1.5
+readonly TREND_FALLING=0
+readonly TREND_STABLE=0.3
+readonly PI_RESTORE_WINDOW=300
+readonly STALE_TEMP_THRESHOLD=30
+readonly INTEGRAL_REDUCE_FACTOR=0.25
+
+# =============================================================================
+# Configuration (replaced at deploy time)
+# =============================================================================
+
 MQTT_HOST="REPLACE_ME"
 MQTT_USER="REPLACE_ME"
 MQTT_PASS="REPLACE_ME"
@@ -10,12 +26,14 @@ MQTT_SYSTEM="${MQTT_ROOT}/system"
 MQTT_CONTROL="${MQTT_ROOT}/control"
 MQTT_FAN="${MQTT_CONTROL}/fan"
 
-HDD_DEVICES=(sda sdb sdc sdd sde sdf sdg sdh)
-
 STATE_FILE="/tmp/fan_control_state"
 LAST_PWM_FILE="/tmp/fan_control_last_pwm"
 SHARED_TEMP_FILE="/tmp/unas_hdd_temp"
 MONITOR_INTERVAL_FILE="/tmp/unas_monitor_interval"
+
+# =============================================================================
+# State variables
+# =============================================================================
 
 FAN_MODE="unas_managed"
 MIN_TEMP=40
@@ -24,6 +42,7 @@ MIN_FAN=64
 MAX_FAN=255
 TARGET_TEMP=42
 TEMP_METRIC="max"
+RESPONSE_SPEED="balanced"
 
 PI_INTEGRAL=0
 PI_LAST_PWM=0
@@ -43,28 +62,49 @@ TEMP_HISTORY=""
 TEMP_HISTORY_SIZE=6
 LAST_TEMP_FILE_MTIME=0
 
-RESPONSE_SPEED="balanced"
+# =============================================================================
+# Utility functions
+# =============================================================================
 
-# Initialize state file with defaults
-{
-    echo "FAN_MODE=$FAN_MODE"
-    echo "MIN_TEMP=$MIN_TEMP"
-    echo "MAX_TEMP=$MAX_TEMP"
-    echo "MIN_FAN=$MIN_FAN"
-    echo "MAX_FAN=$MAX_FAN"
-    echo "TARGET_TEMP=$TARGET_TEMP"
-    echo "TEMP_METRIC=$TEMP_METRIC"
-    echo "RESPONSE_SPEED=$RESPONSE_SPEED"
-} > "$STATE_FILE"
+pwm_to_percent() {
+    echo "$(($1 * 100 / 255))%"
+}
 
-echo "0" > "$LAST_PWM_FILE"
+is_integer() {
+    [[ "$1" =~ ^[0-9]+$ ]]
+}
 
-SERVICE=false
-[ "${1:-}" = "--service" ] && SERVICE=true
+temp_to_int() {
+    echo "${1%.*}"
+}
+
+format_data_source() {
+    [ "$1" = "fallback" ] && echo "direct poll" || echo "${1}s old"
+}
 
 escape_sed_replacement() {
     printf '%s' "$1" | sed -e 's/[\\/&]/\\&/g'
 }
+
+float_compare() {
+    awk -v a="$1" -v op="$2" -v b="$3" 'BEGIN {
+        if (op == ">") exit !(a > b)
+        if (op == "<") exit !(a < b)
+        if (op == ">=") exit !(a >= b)
+        if (op == "<=") exit !(a <= b)
+        if (op == "==") exit !(a == b)
+        exit 1
+    }'
+}
+
+set_pwm() {
+    echo "$1" > /sys/class/hwmon/hwmon0/pwm1
+    echo "$1" > /sys/class/hwmon/hwmon0/pwm2
+}
+
+# =============================================================================
+# MQTT functions
+# =============================================================================
 
 update_state_from_mqtt() {
     local topic=$1 payload=$2
@@ -75,23 +115,23 @@ update_state_from_mqtt() {
             var_name="FAN_MODE"
             ;;
         min_temp)
-            [[ "$payload" =~ ^[0-9]+$ ]] || return
+            is_integer "$payload" || return
             var_name="MIN_TEMP"
             ;;
         max_temp)
-            [[ "$payload" =~ ^[0-9]+$ ]] || return
+            is_integer "$payload" || return
             var_name="MAX_TEMP"
             ;;
         min_fan)
-            [[ "$payload" =~ ^[0-9]+$ ]] || return
+            is_integer "$payload" || return
             var_name="MIN_FAN"
             ;;
         max_fan)
-            [[ "$payload" =~ ^[0-9]+$ ]] || return
+            is_integer "$payload" || return
             var_name="MAX_FAN"
             ;;
         target_temp)
-            [[ "$payload" =~ ^[0-9]+$ ]] || return
+            is_integer "$payload" || return
             var_name="TARGET_TEMP"
             ;;
         temp_metric)
@@ -115,65 +155,32 @@ update_state_from_mqtt() {
     } 200>"${STATE_FILE}.lock"
 }
 
-# fetch retained MQTT messages on startup (retry up to 30 times every 2 seconds in case MQTT connection not ready yet)
-echo "Fetching MQTT state..."
-MQTT_OUTPUT=""
-for i in {1..30}; do
-    MQTT_OUTPUT=$(timeout 5 mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
-        -t "${MQTT_FAN}/mode" \
-        -t "${MQTT_FAN}/curve/+" \
-        -C 8 \
-        -F "%t %p" 2>/dev/null || true)
-    
-    if [ -n "$MQTT_OUTPUT" ]; then
-        break
+publish_if_changed() {
+    local new_pwm=$1
+    local last_pwm
+    last_pwm=$(cat "$LAST_PWM_FILE" 2>/dev/null || echo "0")
+
+    if [ "$new_pwm" != "$last_pwm" ]; then
+        mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
+            -t "${MQTT_SYSTEM}/fan_speed" -m "$new_pwm" 2>/dev/null || true
+        echo "$new_pwm" > "$LAST_PWM_FILE"
     fi
-    
-    [ "$i" -lt 30 ] && sleep 2
-done
-
-if [ -n "$MQTT_OUTPUT" ]; then
-    echo "$MQTT_OUTPUT" | while read -r topic payload; do
-        update_state_from_mqtt "$topic" "$payload"
-    done
-    echo "Fan control initialized with MQTT state:"
-else
-    echo "No retained MQTT messages found, using defaults:"
-fi
-
-cat "$STATE_FILE"
-
-# start persistent MQTT subscription for updates
-mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
-    -t "${MQTT_FAN}/mode" \
-    -t "${MQTT_FAN}/curve/+" \
-    -F "%t %p" 2>/dev/null | while read -r topic payload; do
-    update_state_from_mqtt "$topic" "$payload"
-done &
-MQTT_PID=$!
+}
 
 cleanup() {
     kill "$MQTT_PID" 2>/dev/null || true
 }
-trap cleanup EXIT TERM INT
 
-float_compare() {
-    awk -v a="$1" -v op="$2" -v b="$3" 'BEGIN {
-        if (op == ">") exit !(a > b)
-        if (op == "<") exit !(a < b)
-        if (op == ">=") exit !(a >= b)
-        if (op == "<=") exit !(a <= b)
-        if (op == "==") exit !(a == b)
-        exit 1
-    }'
-}
+# =============================================================================
+# Temperature functions
+# =============================================================================
 
 get_hdd_temps_fallback() {
     local temps=""
     for dev in "${HDD_DEVICES[@]}"; do
         [ -e "/dev/$dev" ] || continue
         temp=$(timeout 5 smartctl -A "/dev/$dev" 2>/dev/null | awk '/194 Temperature_Celsius/ {print $10}' || echo 0)
-        [[ "$temp" =~ ^[0-9]+$ ]] && [ "$temp" -gt 0 ] && temps="$temps $temp"
+        is_integer "$temp" && [ "$temp" -gt 0 ] && temps="$temps $temp"
     done
     echo "$temps" | tr ' ' '\n' | sort -rn | tr '\n' ' ' | sed 's/ *$//' | sed 's/$/:fallback/'
 }
@@ -243,22 +250,22 @@ update_temp_trend() {
 
     TEMP_HISTORY="$TEMP_HISTORY $current_temp"
     local count
-    count=$(echo $TEMP_HISTORY | wc -w)
-    [ "$count" -gt "$TEMP_HISTORY_SIZE" ] && TEMP_HISTORY=$(echo $TEMP_HISTORY | cut -d' ' -f2-)
+    count=$(echo "$TEMP_HISTORY" | wc -w)
+    [ "$count" -gt "$TEMP_HISTORY_SIZE" ] && TEMP_HISTORY=$(echo "$TEMP_HISTORY" | cut -d' ' -f2-)
 
-    count=$(echo $TEMP_HISTORY | wc -w)
+    count=$(echo "$TEMP_HISTORY" | wc -w)
     [ "$count" -lt 3 ] && return
 
     local oldest newest diff
-    oldest=$(echo $TEMP_HISTORY | cut -d' ' -f1)
-    newest=$(echo $TEMP_HISTORY | awk '{print $NF}')
+    oldest=$(echo "$TEMP_HISTORY" | cut -d' ' -f1)
+    newest=$(echo "$TEMP_HISTORY" | awk '{print $NF}')
     diff=$(awk -v n="$newest" -v o="$oldest" 'BEGIN {printf "%.1f", n - o}')
 
-    if float_compare "$diff" "<=" -1.5; then
+    if float_compare "$diff" "<=" "$TREND_FALLING_FAST"; then
         PI_TREND_MULT="0"
-    elif float_compare "$diff" "<" 0; then
+    elif float_compare "$diff" "<" "$TREND_FALLING"; then
         PI_TREND_MULT="0.2"
-    elif float_compare "$diff" "<" 0.3; then
+    elif float_compare "$diff" "<" "$TREND_STABLE"; then
         PI_TREND_MULT="1.0"
     else
         PI_TREND_MULT="1.5"
@@ -272,6 +279,16 @@ get_response_multiplier() {
         aggressive) echo "2.0" ;;
         *)          echo "1.0" ;;
     esac
+}
+
+# =============================================================================
+# PI controller functions
+# =============================================================================
+
+reset_pi_controller() {
+    PI_INTEGRAL=0
+    PI_LAST_PWM=0
+    PI_LAST_TIME=0
 }
 
 calculate_pwm() {
@@ -359,60 +376,42 @@ calculate_target_temp_pwm() {
     PI_RESULT=$new_pwm
 }
 
-reset_pi_controller() {
-    PI_INTEGRAL=0
-    PI_LAST_PWM=0
-    PI_LAST_TIME=0
-}
+# =============================================================================
+# Mode handlers
+# =============================================================================
 
-publish_if_changed() {
-    local new_pwm=$1
-    local last_pwm
-    last_pwm=$(cat "$LAST_PWM_FILE" 2>/dev/null || echo "0")
-
-    if [ "$new_pwm" != "$last_pwm" ]; then
-        mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
-            -t "${MQTT_SYSTEM}/fan_speed" -m "$new_pwm" 2>/dev/null || true
-        echo "$new_pwm" > "$LAST_PWM_FILE"
+# PI Mode transition handlers
+handle_target_change() {
+    if [ -z "$PREV_TARGET_TEMP" ] || [ "$TARGET_TEMP" = "$PREV_TARGET_TEMP" ]; then
+        PREV_TARGET_TEMP=$TARGET_TEMP
+        return
     fi
-}
 
-set_pwm() {
-    echo "$1" > /sys/class/hwmon/hwmon0/pwm1
-    echo "$1" > /sys/class/hwmon/hwmon0/pwm2
-}
+    local current_temp_int
+    current_temp_int=$(get_temp_for_metric "$(get_hdd_temp_with_age)")
+    current_temp_int=$(temp_to_int "$current_temp_int")
 
-set_fan_speed() {
-    # shellcheck source=/dev/null
-    source "$STATE_FILE"
-
-    # detect target temperature change and reduce integral if now below target
-    if [ -n "$PREV_TARGET_TEMP" ] && [ "$TARGET_TEMP" != "$PREV_TARGET_TEMP" ]; then
-        local current_temp_int
-        current_temp_int=$(get_temp_for_metric "$(get_hdd_temp_with_age)")
-        current_temp_int=${current_temp_int%.*}
-        if [ "$current_temp_int" -lt "$TARGET_TEMP" ]; then
-            # below new target - reduce integral to 25%
-            PI_INTEGRAL=$(awk -v i="$PI_INTEGRAL" 'BEGIN {printf "%.2f", i * 0.25}')
-            echo "TARGET CHANGE: ${PREV_TARGET_TEMP}°C → ${TARGET_TEMP}°C, now below target, integral reduced: I:$PI_INTEGRAL"
-        fi
+    if [ "$current_temp_int" -lt "$TARGET_TEMP" ]; then
+        PI_INTEGRAL=$(awk -v i="$PI_INTEGRAL" -v f="$INTEGRAL_REDUCE_FACTOR" 'BEGIN {printf "%.2f", i * f}')
+        echo "TARGET CHANGE: ${PREV_TARGET_TEMP}°C → ${TARGET_TEMP}°C, now below target, integral reduced: I:$PI_INTEGRAL"
     fi
     PREV_TARGET_TEMP=$TARGET_TEMP
+}
 
-    local pwm
-
+handle_mode_transition() {
     # save PI state when leaving target_temp mode
     if [ "$PREV_FAN_MODE" = "target_temp" ] && [ "$FAN_MODE" != "target_temp" ]; then
         SAVED_PI_INTEGRAL=$PI_INTEGRAL
         SAVED_PI_TIME=$(date +%s)
     fi
 
+    # restore/init PI state when entering target_temp mode
     if [ "$FAN_MODE" = "target_temp" ] && [ "$PREV_FAN_MODE" != "target_temp" ]; then
         reset_pi_controller
         TEMP_HISTORY=""
         LAST_TEMP_FILE_MTIME=0
 
-        # warm start, calculate integral from current hardware PWM
+        # warm start: calculate integral from current hardware PWM
         local current_pwm pi_max_integral_init calculated_integral=0
         current_pwm=$(cat /sys/class/hwmon/hwmon0/pwm1 2>/dev/null || echo 0)
         pi_max_integral_init=$((MAX_FAN - MIN_FAN))
@@ -421,7 +420,7 @@ set_fan_speed() {
             local current_temp_int temp_info expected_p_term
             temp_info=$(get_hdd_temp_with_age)
             current_temp_int=$(get_temp_for_metric "$temp_info")
-            current_temp_int=${current_temp_int%.*}
+            current_temp_int=$(temp_to_int "$current_temp_int")
             expected_p_term=$(( (current_temp_int - TARGET_TEMP) * PI_KP ))
             [ "$expected_p_term" -lt 0 ] && expected_p_term=0
             calculated_integral=$((current_pwm - MIN_FAN - expected_p_term))
@@ -429,11 +428,11 @@ set_fan_speed() {
             [ "$calculated_integral" -gt "$pi_max_integral_init" ] && calculated_integral=$pi_max_integral_init
         fi
 
-        # restore saved integral if changed back to PI mode within 3 minutes, otherwise use warm start
+        # restore saved integral if changed back to PI mode within window, otherwise use warm start
         local now elapsed
         now=$(date +%s)
         elapsed=$((now - SAVED_PI_TIME))
-        if [ -n "$SAVED_PI_INTEGRAL" ] && [ "$elapsed" -lt 300 ]; then
+        if [ -n "$SAVED_PI_INTEGRAL" ] && [ "$elapsed" -lt "$PI_RESTORE_WINDOW" ]; then
             PI_INTEGRAL=$SAVED_PI_INTEGRAL
             echo "MODE SWITCH: Restored saved integral ($SAVED_PI_INTEGRAL) after ${elapsed}s, calculated was ($calculated_integral)"
         else
@@ -442,108 +441,208 @@ set_fan_speed() {
         fi
         SAVED_PI_INTEGRAL=""
     fi
+
     PREV_FAN_MODE="$FAN_MODE"
+}
 
-    if [ "$FAN_MODE" = "unas_managed" ]; then
-        local temp_info temps max_temp avg_temp file_age drive_count
-        temp_info=$(get_hdd_temp_with_age)
-        temps="${temp_info%%:*}"
-        file_age="${temp_info##*:}"
-        max_temp="${temps%% *}"  # first temp (sorted descending)
+# Fan mode implementations (set FAN_PWM_RESULT, print log line)
+handle_mode_unas_managed() {
+    local temp_info temps max_temp avg_temp file_age drive_count
+    temp_info=$(get_hdd_temp_with_age)
+    temps="${temp_info%%:*}"
+    file_age="${temp_info##*:}"
+    max_temp="${temps%% *}"
 
-        # calculate average and count drives
-        avg_temp=$(echo "$temps" | awk '{sum=0; for(i=1;i<=NF;i++) sum+=$i; printf "%.1f", sum/NF}')
-        drive_count=$(echo "$temps" | wc -w)
+    avg_temp=$(echo "$temps" | awk '{sum=0; for(i=1;i<=NF;i++) sum+=$i; printf "%.1f", sum/NF}')
+    drive_count=$(echo "$temps" | wc -w)
 
-        pwm=$(cat /sys/class/hwmon/hwmon0/pwm1 2>/dev/null || echo 0)
+    FAN_PWM_RESULT=$(cat /sys/class/hwmon/hwmon0/pwm1 2>/dev/null || echo 0)
 
-        if [ "$file_age" = "fallback" ]; then
-            echo "UNAS MANAGED: drives=[${temps// /,}] max=${max_temp}°C avg=${avg_temp}°C (${drive_count} drives, direct poll) → $pwm PWM ($((pwm * 100 / 255))%)"
-        else
-            echo "UNAS MANAGED: drives=[${temps// /,}] max=${max_temp}°C avg=${avg_temp}°C (${drive_count} drives, ${file_age}s old) → $pwm PWM ($((pwm * 100 / 255))%)"
-        fi
+    echo "UNAS MANAGED: drives=[${temps// /,}] max=${max_temp}°C avg=${avg_temp}°C (${drive_count} drives, $(format_data_source "$file_age")) → $FAN_PWM_RESULT PWM ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+}
 
-    elif [ "$FAN_MODE" = "auto" ]; then
-        local temp_info temps temp file_age
-        temp_info=$(get_hdd_temp_with_age)
-        temps="${temp_info%%:*}"
-        temp="${temps%% *}"  # get first (max) temperature
-        file_age="${temp_info##*:}"
+handle_mode_custom_curve() {
+    local temp_info temps temp file_age
+    temp_info=$(get_hdd_temp_with_age)
+    temps="${temp_info%%:*}"
+    temp="${temps%% *}"
+    file_age="${temp_info##*:}"
 
-        pwm=$(calculate_pwm "$temp" "$MIN_TEMP" "$MAX_TEMP" "$MIN_FAN" "$MAX_FAN")
-        set_pwm "$pwm"
+    FAN_PWM_RESULT=$(calculate_pwm "$temp" "$MIN_TEMP" "$MAX_TEMP" "$MIN_FAN" "$MAX_FAN")
+    set_pwm "$FAN_PWM_RESULT"
 
-        if [ "$file_age" = "fallback" ]; then
-            echo "CUSTOM CURVE MODE: ${temp}°C (direct poll) → $pwm PWM ($((pwm * 100 / 255))%)"
-        else
-            echo "CUSTOM CURVE MODE: ${temp}°C (${file_age}s old) → $pwm PWM ($((pwm * 100 / 255))%)"
-        fi
+    echo "CUSTOM CURVE MODE: ${temp}°C ($(format_data_source "$file_age")) → $FAN_PWM_RESULT PWM ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+}
 
-    elif [ "$FAN_MODE" = "target_temp" ]; then
-        local temp_info file_age temp metric_label
-        temp_info=$(get_hdd_temp_with_age)
-        file_age="${temp_info##*:}"
+handle_mode_target_temp() {
+    local temp_info file_age temp metric_label
+
+    temp_info=$(get_hdd_temp_with_age)
+    file_age="${temp_info##*:}"
+    temp=$(get_temp_for_metric "$temp_info")
+
+    # if temp data is too stale, poll drives directly for PI controller
+    if [ "$file_age" != "fallback" ] && [ "$file_age" -gt "$STALE_TEMP_THRESHOLD" ]; then
+        temp_info=$(get_hdd_temps_fallback)
+        file_age="fallback"
         temp=$(get_temp_for_metric "$temp_info")
+    fi
 
-        # if temp data is too stale (>30s), poll drives directly for PI controller
-        if [ "$file_age" != "fallback" ] && [ "$file_age" -gt 30 ]; then
-            temp_info=$(get_hdd_temps_fallback)
-            file_age="fallback"
-            temp=$(get_temp_for_metric "$temp_info")
-        fi
+    local temp_int
+    temp_int=$(temp_to_int "$temp")
+    metric_label="max"
+    [ "$TEMP_METRIC" = "avg" ] && metric_label="avg"
 
-        local temp_int=${temp%.*}
-        metric_label="max"
-        [ "$TEMP_METRIC" = "avg" ] && metric_label="avg"
-
-        if [ "$temp_int" -eq 0 ]; then
-            pwm=$MIN_FAN
-            set_pwm "$pwm"
-            echo "TARGET TEMP MODE [$RESPONSE_SPEED]: No drives detected, using min fan ($((pwm * 100 / 255))%)"
-        else
-            calculate_target_temp_pwm "$temp" "$TARGET_TEMP" "$MIN_FAN" "$MAX_FAN"
-            pwm=$PI_RESULT
-            set_pwm "$pwm"
-
-            local error
-            error=$(awk -v t="$temp" -v target="$TARGET_TEMP" 'BEGIN {printf "%.1f", t - target}')
-            local status="at target"
-            if float_compare "$error" ">" 0; then
-                status="cooling (+${error}°C)"
-            elif float_compare "$error" "<" 0; then
-                status="warm up (${error}°C)"
-            fi
-
-            if [ "$file_age" = "fallback" ]; then
-                echo "TARGET TEMP MODE [$RESPONSE_SPEED]: ${temp}°C ($metric_label) → ${TARGET_TEMP}°C target ($status) → $pwm PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($((pwm * 100 / 255))%)"
-            else
-                echo "TARGET TEMP MODE [$RESPONSE_SPEED]: ${temp}°C ($metric_label, $(printf "%2s" "$file_age")s old) → ${TARGET_TEMP}°C target ($status) → $pwm PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($((pwm * 100 / 255))%)"
-            fi
-        fi
-
-    elif [[ "$FAN_MODE" =~ ^[0-9]+$ ]] && [ "$FAN_MODE" -ge 0 ] && [ "$FAN_MODE" -le 255 ]; then
-        set_pwm "$FAN_MODE"
-        pwm=$FAN_MODE
-        echo "SET SPEED MODE: $pwm PWM ($((pwm * 100 / 255))%)"
-
-    else
-        echo "Invalid mode: $FAN_MODE, defaulting to UNAS Managed"
-        {
-            echo "FAN_MODE=unas_managed"
-            echo "MIN_TEMP=$MIN_TEMP"
-            echo "MAX_TEMP=$MAX_TEMP"
-            echo "MIN_FAN=$MIN_FAN"
-            echo "MAX_FAN=$MAX_FAN"
-            echo "TARGET_TEMP=$TARGET_TEMP"
-            echo "TEMP_METRIC=$TEMP_METRIC"
-            echo "RESPONSE_SPEED=$RESPONSE_SPEED"
-        } > "$STATE_FILE"
-        reset_pi_controller
+    if [ "$temp_int" -eq 0 ]; then
+        FAN_PWM_RESULT=$MIN_FAN
+        set_pwm "$FAN_PWM_RESULT"
+        echo "TARGET TEMP MODE [$RESPONSE_SPEED]: No drives detected, using min fan ($(pwm_to_percent "$FAN_PWM_RESULT"))"
         return
     fi
 
-    publish_if_changed "$pwm"
+    calculate_target_temp_pwm "$temp" "$TARGET_TEMP" "$MIN_FAN" "$MAX_FAN"
+    FAN_PWM_RESULT=$PI_RESULT
+    set_pwm "$FAN_PWM_RESULT"
+
+    local error status
+    error=$(awk -v t="$temp" -v target="$TARGET_TEMP" 'BEGIN {printf "%.1f", t - target}')
+    status="at target"
+    if float_compare "$error" ">" 0; then
+        status="cooling (+${error}°C)"
+    elif float_compare "$error" "<" 0; then
+        status="warm up (${error}°C)"
+    fi
+
+    local data_source
+    if [ "$file_age" = "fallback" ]; then
+        data_source="direct poll"
+    else
+        data_source="$(printf "%2s" "$file_age")s old"
+    fi
+
+    echo "TARGET TEMP MODE [$RESPONSE_SPEED]: ${temp}°C ($metric_label, $data_source) → ${TARGET_TEMP}°C target ($status) → $FAN_PWM_RESULT PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($(pwm_to_percent "$FAN_PWM_RESULT"))"
 }
+
+handle_mode_set_speed() {
+    set_pwm "$FAN_MODE"
+    FAN_PWM_RESULT=$FAN_MODE
+    echo "SET SPEED MODE: $FAN_PWM_RESULT PWM ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+}
+
+reset_to_defaults() {
+    echo "Invalid mode: $FAN_MODE, defaulting to UNAS Managed"
+    {
+        echo "FAN_MODE=unas_managed"
+        echo "MIN_TEMP=$MIN_TEMP"
+        echo "MAX_TEMP=$MAX_TEMP"
+        echo "MIN_FAN=$MIN_FAN"
+        echo "MAX_FAN=$MAX_FAN"
+        echo "TARGET_TEMP=$TARGET_TEMP"
+        echo "TEMP_METRIC=$TEMP_METRIC"
+        echo "RESPONSE_SPEED=$RESPONSE_SPEED"
+    } > "$STATE_FILE"
+    reset_pi_controller
+}
+
+# =============================================================================
+# Main dispatcher
+# =============================================================================
+
+set_fan_speed() {
+    # shellcheck source=/dev/null
+    source "$STATE_FILE"
+
+    handle_target_change
+    handle_mode_transition
+
+    FAN_PWM_RESULT=0
+
+    case "$FAN_MODE" in
+        unas_managed)
+            handle_mode_unas_managed
+            ;;
+        auto)
+            handle_mode_custom_curve
+            ;;
+        target_temp)
+            handle_mode_target_temp
+            ;;
+        *)
+            if is_integer "$FAN_MODE" && [ "$FAN_MODE" -ge 0 ] && [ "$FAN_MODE" -le 255 ]; then
+                handle_mode_set_speed
+            else
+                reset_to_defaults
+                return
+            fi
+            ;;
+    esac
+
+    publish_if_changed "$FAN_PWM_RESULT"
+}
+
+# =============================================================================
+# Initialization
+# =============================================================================
+
+# Initialize state file with defaults
+{
+    echo "FAN_MODE=$FAN_MODE"
+    echo "MIN_TEMP=$MIN_TEMP"
+    echo "MAX_TEMP=$MAX_TEMP"
+    echo "MIN_FAN=$MIN_FAN"
+    echo "MAX_FAN=$MAX_FAN"
+    echo "TARGET_TEMP=$TARGET_TEMP"
+    echo "TEMP_METRIC=$TEMP_METRIC"
+    echo "RESPONSE_SPEED=$RESPONSE_SPEED"
+} > "$STATE_FILE"
+
+echo "0" > "$LAST_PWM_FILE"
+
+SERVICE=false
+[ "${1:-}" = "--service" ] && SERVICE=true
+
+# Fetch retained MQTT messages on startup (retry up to 30 times every 2 seconds)
+echo "Fetching MQTT state..."
+MQTT_OUTPUT=""
+for i in {1..30}; do
+    MQTT_OUTPUT=$(timeout 5 mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
+        -t "${MQTT_FAN}/mode" \
+        -t "${MQTT_FAN}/curve/+" \
+        -C 8 \
+        -F "%t %p" 2>/dev/null || true)
+
+    if [ -n "$MQTT_OUTPUT" ]; then
+        break
+    fi
+
+    [ "$i" -lt 30 ] && sleep 2
+done
+
+if [ -n "$MQTT_OUTPUT" ]; then
+    echo "$MQTT_OUTPUT" | while read -r topic payload; do
+        update_state_from_mqtt "$topic" "$payload"
+    done
+    echo "Fan control initialized with MQTT state:"
+else
+    echo "No retained MQTT messages found, using defaults:"
+fi
+
+cat "$STATE_FILE"
+
+# Start persistent MQTT subscription for updates
+mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
+    -t "${MQTT_FAN}/mode" \
+    -t "${MQTT_FAN}/curve/+" \
+    -F "%t %p" 2>/dev/null | while read -r topic payload; do
+    update_state_from_mqtt "$topic" "$payload"
+done &
+MQTT_PID=$!
+
+trap cleanup EXIT TERM INT
+
+# =============================================================================
+# Main loop
+# =============================================================================
 
 if $SERVICE; then
     while true; do
