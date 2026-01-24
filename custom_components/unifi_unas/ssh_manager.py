@@ -114,11 +114,6 @@ class SSHManager:
         _LOGGER.debug("Service %s running: %s", service_name, running)
         return running
 
-    def _escape_for_bash(self, value: str) -> str:
-        for char in ['\\', '$', '`', '"']:
-            value = value.replace(char, f'\\{char}')
-        return value
-
     def _replace_mqtt_credentials(self, script: str, mqtt_root: str) -> str:
         replacements = {
             "MQTT_HOST": self.mqtt_host,
@@ -130,9 +125,8 @@ class SSHManager:
         for key, value in replacements.items():
             # unas_monitor.py
             script = script.replace(f'{key} = "REPLACE_ME"', f'{key} = "{value}"')
-
-            # fan_control.sh - escape shell special characters
-            script = script.replace(f'{key}="REPLACE_ME"', f'{key}="{self._escape_for_bash(value)}"')
+            # fan_control.sh
+            script = script.replace(f'{key}="REPLACE_ME"', f'{key}={shlex.quote(value)}')
 
         return script
 
