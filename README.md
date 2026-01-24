@@ -37,11 +37,11 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
 
 ## Supported Devices
 
-- **UNAS Pro** – Fully supported
-- **UNAS Pro 8** – Fully supported
-- **UNAS Pro 4** – Unconfirmed, bays possibly not mapped correctly
-- **UNAS 4** – Unconfirmed
-- **UNAS 2** – Unconfirmed
+- **UNAS Pro**
+- **UNAS Pro 8**
+- **UNAS Pro 4** - Drive bay mappings may be incorrect (likely correct, but require confirmation)
+- **UNAS 4** – Drive bay mappings may be incorrect (likely correct, but require confirmation)
+- **UNAS 2**
 - **UNVR** – Unofficial support (see note below)
 
 > **UNVR Note:** The UNVR is not a UNAS device, but this integration has been confirmed to work with it
@@ -55,7 +55,7 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
 <details>
 <summary><strong>Help confirm device support!</strong></summary>
 
-If you own a UNAS Pro 4, UNAS 4, or UNAS 2, you can help confirm drive bay mappings by running this command
+If you own a UNAS Pro 4 or UNAS 4, you can help confirm drive bay mappings by running this command
 on your UNAS via SSH:
 
 ```bash
