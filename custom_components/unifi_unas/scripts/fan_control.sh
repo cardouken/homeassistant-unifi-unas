@@ -30,6 +30,9 @@ STATE_FILE="/tmp/fan_control_state"
 LAST_PWM_FILE="/tmp/fan_control_last_pwm"
 SHARED_TEMP_FILE="/tmp/unas_hdd_temp"
 MONITOR_INTERVAL_FILE="/tmp/unas_monitor_interval"
+LOG_FILE="/var/log/fan_control.log"
+LOG_MAX_SIZE=26214400  # 25MB (~48 hours)
+LOG_BACKUPS=3  # keep .1, .2, .3 (~1 week total)
 
 # =============================================================================
 # State variables
@@ -61,6 +64,32 @@ PI_MAX_RATE=5
 TEMP_HISTORY=""
 TEMP_HISTORY_SIZE=6
 LAST_TEMP_FILE_MTIME=0
+
+# =============================================================================
+# Logging functions
+# =============================================================================
+
+rotate_log_if_needed() {
+    if [ -f "$LOG_FILE" ]; then
+        local size
+        size=$(stat -c %s "$LOG_FILE" 2>/dev/null || echo 0)
+        if [ "$size" -gt "$LOG_MAX_SIZE" ]; then
+            # shift older backups
+            for i in $(seq $((LOG_BACKUPS - 1)) -1 1); do
+                [ -f "${LOG_FILE}.$i" ] && mv "${LOG_FILE}.$i" "${LOG_FILE}.$((i + 1))"
+            done
+            mv "$LOG_FILE" "${LOG_FILE}.1"
+        fi
+    fi
+}
+
+log() {
+    local timestamp msg
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    msg="[$timestamp] $*"
+    echo "$msg"
+    echo "$msg" >> "$LOG_FILE"
+}
 
 # =============================================================================
 # Utility functions
@@ -205,19 +234,19 @@ get_hdd_temp_with_age() {
             local temp
             temp=$(cat "$SHARED_TEMP_FILE" 2>/dev/null)
             if [ -z "$temp" ]; then
-                echo "WARNING: Shared temp file empty, polling HDD temps directly" >&2
+                log "WARNING: Shared temp file empty, polling HDD temps directly"
                 get_hdd_temps_fallback
                 return
             fi
             echo "$temp:$file_age"
             return
         else
-            echo "WARNING: Shared temp file stale (${file_age}s), polling HDD temps directly" >&2
+            log "WARNING: Shared temp file stale (${file_age}s), polling HDD temps directly"
             get_hdd_temps_fallback
             return
         fi
     else
-        echo "WARNING: Shared temp file missing, polling HDD temps directly" >&2
+        log "WARNING: Shared temp file missing, polling HDD temps directly"
         get_hdd_temps_fallback
     fi
 }
@@ -393,7 +422,7 @@ handle_target_change() {
 
     if [ "$current_temp_int" -lt "$TARGET_TEMP" ]; then
         PI_INTEGRAL=$(awk -v i="$PI_INTEGRAL" -v f="$INTEGRAL_REDUCE_FACTOR" 'BEGIN {printf "%.2f", i * f}')
-        echo "TARGET CHANGE: ${PREV_TARGET_TEMP}°C → ${TARGET_TEMP}°C, now below target, integral reduced: I:$PI_INTEGRAL"
+        log "TARGET CHANGE: ${PREV_TARGET_TEMP}°C → ${TARGET_TEMP}°C, now below target, integral reduced: I:$PI_INTEGRAL"
     fi
     PREV_TARGET_TEMP=$TARGET_TEMP
 }
@@ -434,10 +463,10 @@ handle_mode_transition() {
         elapsed=$((now - SAVED_PI_TIME))
         if [ -n "$SAVED_PI_INTEGRAL" ] && [ "$elapsed" -lt "$PI_RESTORE_WINDOW" ]; then
             PI_INTEGRAL=$SAVED_PI_INTEGRAL
-            echo "MODE SWITCH: Restored saved integral ($SAVED_PI_INTEGRAL) after ${elapsed}s, calculated was ($calculated_integral)"
+            log "MODE SWITCH: Restored saved integral ($SAVED_PI_INTEGRAL) after ${elapsed}s, calculated was ($calculated_integral)"
         else
             [ "$calculated_integral" -gt 0 ] && PI_INTEGRAL=$calculated_integral
-            [ -n "$SAVED_PI_INTEGRAL" ] && echo "MODE SWITCH: Saved integral expired (${elapsed}s), using calculated ($calculated_integral)"
+            [ -n "$SAVED_PI_INTEGRAL" ] && log "MODE SWITCH: Saved integral expired (${elapsed}s), using calculated ($calculated_integral)"
         fi
         SAVED_PI_INTEGRAL=""
     fi
@@ -458,7 +487,7 @@ handle_mode_unas_managed() {
 
     FAN_PWM_RESULT=$(cat /sys/class/hwmon/hwmon0/pwm1 2>/dev/null || echo 0)
 
-    echo "UNAS MANAGED: drives=[${temps// /,}] max=${max_temp}°C avg=${avg_temp}°C (${drive_count} drives, $(format_data_source "$file_age")) → $FAN_PWM_RESULT PWM ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+    log "UNAS MANAGED: drives=[${temps// /,}] max=${max_temp}°C avg=${avg_temp}°C (${drive_count} drives, $(format_data_source "$file_age")) → $FAN_PWM_RESULT PWM ($(pwm_to_percent "$FAN_PWM_RESULT"))"
 }
 
 handle_mode_custom_curve() {
@@ -471,7 +500,7 @@ handle_mode_custom_curve() {
     FAN_PWM_RESULT=$(calculate_pwm "$temp" "$MIN_TEMP" "$MAX_TEMP" "$MIN_FAN" "$MAX_FAN")
     set_pwm "$FAN_PWM_RESULT"
 
-    echo "CUSTOM CURVE MODE: ${temp}°C ($(format_data_source "$file_age")) → $FAN_PWM_RESULT PWM ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+    log "CUSTOM CURVE MODE: ${temp}°C ($(format_data_source "$file_age")) → $FAN_PWM_RESULT PWM ($(pwm_to_percent "$FAN_PWM_RESULT"))"
 }
 
 handle_mode_target_temp() {
@@ -496,7 +525,7 @@ handle_mode_target_temp() {
     if [ "$temp_int" -eq 0 ]; then
         FAN_PWM_RESULT=$MIN_FAN
         set_pwm "$FAN_PWM_RESULT"
-        echo "TARGET TEMP MODE [$RESPONSE_SPEED]: No drives detected, using min fan ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+        log "TARGET TEMP MODE [$RESPONSE_SPEED]: No drives detected, using min fan ($(pwm_to_percent "$FAN_PWM_RESULT"))"
         return
     fi
 
@@ -520,17 +549,17 @@ handle_mode_target_temp() {
         data_source="$(printf "%2s" "$file_age")s old"
     fi
 
-    echo "TARGET TEMP MODE [$RESPONSE_SPEED]: ${temp}°C ($metric_label, $data_source) → ${TARGET_TEMP}°C target ($status) → $FAN_PWM_RESULT PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+    log "TARGET TEMP MODE [$RESPONSE_SPEED]: ${temp}°C ($metric_label, $data_source) → ${TARGET_TEMP}°C target ($status) → $FAN_PWM_RESULT PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($(pwm_to_percent "$FAN_PWM_RESULT"))"
 }
 
 handle_mode_set_speed() {
     set_pwm "$FAN_MODE"
     FAN_PWM_RESULT=$FAN_MODE
-    echo "SET SPEED MODE: $FAN_PWM_RESULT PWM ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+    log "SET SPEED MODE: $FAN_PWM_RESULT PWM ($(pwm_to_percent "$FAN_PWM_RESULT"))"
 }
 
 reset_to_defaults() {
-    echo "Invalid mode: $FAN_MODE, defaulting to UNAS Managed"
+    log "Invalid mode: $FAN_MODE, defaulting to UNAS Managed"
     {
         echo "FAN_MODE=unas_managed"
         echo "MIN_TEMP=$MIN_TEMP"
@@ -601,8 +630,11 @@ echo "0" > "$LAST_PWM_FILE"
 SERVICE=false
 [ "${1:-}" = "--service" ] && SERVICE=true
 
+rotate_log_if_needed
+log "Fan control service starting..."
+
 # Fetch retained MQTT messages on startup (retry up to 30 times every 2 seconds)
-echo "Fetching MQTT state..."
+log "Fetching MQTT state..."
 MQTT_OUTPUT=""
 for i in {1..30}; do
     MQTT_OUTPUT=$(timeout 5 mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
@@ -622,12 +654,12 @@ if [ -n "$MQTT_OUTPUT" ]; then
     echo "$MQTT_OUTPUT" | while read -r topic payload; do
         update_state_from_mqtt "$topic" "$payload"
     done
-    echo "Fan control initialized with MQTT state:"
+    log "Fan control initialized with MQTT state:"
 else
-    echo "No retained MQTT messages found, using defaults:"
+    log "No retained MQTT messages found, using defaults:"
 fi
 
-cat "$STATE_FILE"
+log "$(cat "$STATE_FILE")"
 
 # Start persistent MQTT subscription for updates
 mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
