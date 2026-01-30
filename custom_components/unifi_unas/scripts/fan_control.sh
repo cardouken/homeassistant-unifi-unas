@@ -14,6 +14,11 @@ readonly PI_RESTORE_WINDOW=300
 readonly STALE_TEMP_THRESHOLD=30
 readonly INTEGRAL_REDUCE_FACTOR=0.25
 
+# Debug toggles
+# SYMMETRIC_DECAY: when true, decay rate also uses response_speed multiplier (0.5x/1x/2x)
+#                  when false, decay always uses 1x rate regardless of response_speed
+SYMMETRIC_DECAY=true
+
 # =============================================================================
 # Configuration (replaced at deploy time)
 # =============================================================================
@@ -358,11 +363,14 @@ calculate_target_temp_pwm() {
     trend_mult=$PI_TREND_MULT
     speed_mult=$(get_response_multiplier)
 
-    # only apply trend/speed multipliers when above target; normal decay rate at/below target
-    if float_compare "$error" ">" 0; then
-        final_mult=$(awk -v t="$trend_mult" -v s="$speed_mult" 'BEGIN {printf "%.2f", t * s}')
+    # apply trend/speed multipliers when above target
+    # decay uses speed_mult only if SYMMETRIC_DECAY is enabled
+    local accum_mult decay_mult
+    accum_mult=$(awk -v t="$trend_mult" -v s="$speed_mult" 'BEGIN {printf "%.2f", t * s}')
+    if $SYMMETRIC_DECAY; then
+        decay_mult=$speed_mult
     else
-        final_mult="1.0"
+        decay_mult="1.0"
     fi
     PI_TREND_MULT=$trend_mult
 
@@ -370,14 +378,14 @@ calculate_target_temp_pwm() {
     if [ "$PI_LAST_PWM" -ge "$max_fan" ] && float_compare "$error" ">" 0; then
         new_integral=$PI_INTEGRAL
     else
-        new_integral=$(awk -v i="$PI_INTEGRAL" -v e="$error" -v ki="$PI_KI" -v dt="$dt" -v max="$pi_max_integral" -v mult="$final_mult" \
+        new_integral=$(awk -v i="$PI_INTEGRAL" -v e="$error" -v ki="$PI_KI" -v dt="$dt" -v max="$pi_max_integral" -v am="$accum_mult" -v dm="$decay_mult" \
             'BEGIN {
                 if (e > 0) {
-                    # Above target: accumulate with trend multiplier
-                    ni = i + ki * e * dt * mult
+                    # Above target: accumulate with trend/speed multiplier
+                    ni = i + ki * e * dt * am
                 } else {
-                    # At/below target: natural decay (no artificial rates)
-                    ni = i + ki * e * dt
+                    # At/below target: decay (symmetric if enabled)
+                    ni = i + ki * e * dt * dm
                 }
                 if (ni > max) ni = max
                 if (ni < 0) ni = 0
@@ -542,14 +550,15 @@ handle_mode_target_temp() {
         status="warm up (${error}°C)"
     fi
 
-    local data_source
+    local data_source decay_mode
     if [ "$file_age" = "fallback" ]; then
         data_source="direct poll"
     else
         data_source="$(printf "%2s" "$file_age")s old"
     fi
+    $SYMMETRIC_DECAY && decay_mode="sym" || decay_mode="asym"
 
-    log "TARGET TEMP MODE [$RESPONSE_SPEED]: ${temp}°C ($metric_label, $data_source) → ${TARGET_TEMP}°C target ($status) → $FAN_PWM_RESULT PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+    log "TARGET TEMP MODE [$RESPONSE_SPEED/$decay_mode]: ${temp}°C ($metric_label, $data_source) → ${TARGET_TEMP}°C target ($status) → $FAN_PWM_RESULT PWM (I:$PI_INTEGRAL T:$PI_TREND_MULT) ($(pwm_to_percent "$FAN_PWM_RESULT"))"
 }
 
 handle_mode_set_speed() {
