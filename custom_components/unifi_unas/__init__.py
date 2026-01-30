@@ -225,6 +225,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await manager.execute_command("rm -f /tmp/fan_control_state")
             await manager.execute_command("rm -f /tmp/unas_hdd_temp")
             await manager.execute_command("rm -f /tmp/unas_monitor_interval")
+            await manager.execute_command("rm -f /var/log/fan_control.log /var/log/fan_control.log.[1-9]")
             await manager.execute_command("systemctl daemon-reload")
             await manager.execute_command("apt remove mosquitto-clients -y")
             await manager.execute_command("pip3 uninstall paho-mqtt -y")
