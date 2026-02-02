@@ -72,20 +72,8 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         if (last_state := await self.async_get_last_state()) is not None:
             self._current_option = last_state.state
             self._last_pwm = last_state.attributes.get("last_pwm")
-
-            mqtt_mode = "unas_managed"
-            if self._current_option == MODE_CUSTOM_CURVE:
-                mqtt_mode = "auto"
-            elif self._current_option == MODE_TARGET_TEMP:
-                mqtt_mode = "target_temp"
-            elif self._current_option == MODE_SET_SPEED:
-                mqtt_mode = str(self._last_pwm or DEFAULT_FAN_SPEED_50_PCT)
-                self._last_pwm = self._last_pwm or DEFAULT_FAN_SPEED_50_PCT
-
-            await self._publish_mode(mqtt_mode)
         else:
             self._current_option = self._mode_managed
-            await self._publish_mode("unas_managed")
 
         @callback
         def message_received(msg):
@@ -198,12 +186,8 @@ class UNASTempMetricSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
         if (last_state := await self.async_get_last_state()) is not None:
             self._current_option = last_state.state
-
-            mqtt_value = "avg" if self._current_option == TEMP_METRIC_AVG else "max"
-            await self._publish_metric(mqtt_value)
         else:
             self._current_option = TEMP_METRIC_MAX
-            await self._publish_metric("max")
 
         @callback
         def message_received(msg):
@@ -319,12 +303,8 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
         if (last_state := await self.async_get_last_state()) is not None:
             self._current_option = last_state.state
-
-            mqtt_value = self._option_to_mqtt(self._current_option)
-            await self._publish_speed(mqtt_value)
         else:
             self._current_option = RESPONSE_BALANCED
-            await self._publish_speed("balanced")
 
         @callback
         def message_received(msg):

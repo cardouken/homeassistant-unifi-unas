@@ -121,6 +121,8 @@ class UNASMQTTClient:
         if parts[0] == "availability":
             self._status = payload
             _LOGGER.debug("UNAS status: %s", self._status)
+            if payload == "online":
+                self._last_update = datetime.now()
             self._schedule_refresh()
 
     def _handle_two_part(self, parts, payload):
@@ -199,17 +201,14 @@ class UNASMQTTClient:
             _LOGGER.warning("Failed to parse JSON attributes for %s", key)
 
     def is_available(self) -> bool:
-        if self._status == "offline":
-            return False
-
         if self._last_update is None:
             return False
 
         time_since_update = (datetime.now() - self._last_update).total_seconds()
-        if time_since_update > 120:
-            return False
+        if time_since_update <= 120:
+            return True
 
-        return True
+        return False
 
     def get_data(self) -> dict[str, Any]:
         self._cleanup_stale_data()

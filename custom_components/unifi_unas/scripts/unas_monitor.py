@@ -92,23 +92,22 @@ class UNASMonitor:
         self.mqtt.on_disconnect = self._on_disconnect
         self.mqtt.on_message = self._on_message
         self._connected = False
+        self.monitor_interval = DEFAULT_MONITOR_INTERVAL
 
         self.mqtt.will_set(MQTT_AVAILABILITY, "offline", retain=True)
+        self.mqtt.loop_start()
         try:
             self.mqtt.connect(MQTT_HOST, 1883, 60)
-            self.mqtt.loop_start()
-            for _ in range(10):
-                if self._connected:
-                    break
-                time.sleep(0.5)
-            if not self._connected:
-                logger.error("MQTT connection failed - not connected after 5s")
         except Exception as e:
-            logger.error(f"MQTT connect error: {e}")
+            logger.warning(f"Initial MQTT connect failed (will retry): {e}")
 
-        self.monitor_interval = DEFAULT_MONITOR_INTERVAL
-        self.mqtt.subscribe(MONITOR_INTERVAL_TOPIC)
-        self.mqtt.publish(MQTT_AVAILABILITY, "online", retain=True)
+        for _ in range(30):
+            if self._connected:
+                break
+            time.sleep(1)
+
+        if not self._connected:
+            logger.warning("MQTT not connected after 30s - will keep retrying in background")
 
         self.bay_cache = {}
         self.known_drives = set()
@@ -125,6 +124,8 @@ class UNASMonitor:
         if reason_code == 0:
             logger.info("MQTT connected")
             self._connected = True
+            self.mqtt.subscribe(MONITOR_INTERVAL_TOPIC)
+            self.mqtt.publish(MQTT_AVAILABILITY, "online", retain=True)
         else:
             logger.error(f"MQTT failed: {reason_code}")
             self._connected = False
