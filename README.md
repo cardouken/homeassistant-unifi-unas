@@ -97,6 +97,7 @@ improve device support!
 - **Storage** - Pool usage, size, available space
 - **Network** - SMB connection count (with client details as attributes), NFS mount count (with share details as
   attributes)
+- **Backup Tasks** - Status, progress percentage, last run time, next scheduled run, source/destination paths
 
 ### Binary Sensors
 
@@ -116,11 +117,16 @@ improve device support!
 
 > **Note:** Controls are context-sensitive—only settings relevant to your selected fan mode are adjustable.
 
+### Switches
+
+- **Backup Schedule** - Enable/disable scheduled backup tasks (one switch per configured backup task)
+
 ### Buttons
 
 - **Reinstall Scripts** - Manually redeploy scripts to UNAS
 - **Reboot** - Reboot the UNAS device
 - **Shutdown** - Shutdown the UNAS device
+- **Trigger Backup** - Manually trigger a backup task (one button per configured backup task)
 
 ![dashboard](dashboard.png)
 
