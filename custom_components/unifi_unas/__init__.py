@@ -38,6 +38,7 @@ PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.SELECT,
     Platform.NUMBER,
+    Platform.SWITCH,
 ]
 
 LAST_CLEANUP_VERSION_KEY = "last_cleanup_version"
@@ -254,7 +255,12 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
         self.discovered_bays: set[str] = set()
         self.discovered_nvmes: set[str] = set()
         self.discovered_pools: set[str] = set()
+        self.discovered_backup_task_sensors: set[str] = set()
+        self.discovered_backup_task_buttons: set[str] = set()
+        self.discovered_backup_task_switches: set[str] = set()
         self.sensor_add_entities = None
+        self.button_add_entities = None
+        self.switch_add_entities = None
 
         super().__init__(
             hass,
@@ -303,15 +309,35 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
                 "fan_control_running": fan_control_running,
             })
 
+            try:
+                result = await self.ssh_manager.execute_backup_api("GET", "/api/v1/remote-backup/tasks")
+                if result.get("data"):
+                    data["backup_tasks"] = result["data"]
+                else:
+                    data["backup_tasks"] = []
+            except Exception as err:
+                _LOGGER.debug("Could not fetch backup tasks: %s", err)
+                data["backup_tasks"] = []
+
             if self.sensor_add_entities is not None:
                 from .sensor import (
                     _discover_and_add_drive_sensors,
                     _discover_and_add_nvme_sensors,
                     _discover_and_add_pool_sensors,
+                    _discover_and_add_backup_sensors,
                 )
                 await _discover_and_add_drive_sensors(self, self.sensor_add_entities)
                 await _discover_and_add_nvme_sensors(self, self.sensor_add_entities)
                 await _discover_and_add_pool_sensors(self, self.sensor_add_entities)
+                await _discover_and_add_backup_sensors(self, self.sensor_add_entities)
+
+            if self.button_add_entities is not None:
+                from .button import _discover_and_add_backup_buttons
+                await _discover_and_add_backup_buttons(self, self.button_add_entities)
+
+            if self.switch_add_entities is not None:
+                from .switch import _discover_and_add_backup_switches
+                await _discover_and_add_backup_switches(self, self.switch_add_entities)
 
         except Exception as err:
             _LOGGER.warning("SSH connection temporarily unavailable: %s", err)

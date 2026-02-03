@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shlex
 from typing import Optional
@@ -181,3 +182,38 @@ class SSHManager:
         if executable:
             safe_path = shlex.quote(remote_path)
             await self.execute_command(f"chmod +x {safe_path}")
+
+    async def execute_backup_api(self, method: str, endpoint: str) -> dict:
+        cmd = f'''curl -s -X {method} "http://localhost:16080{endpoint}" \
+            -H "X-UserId: $(jq -r '.[0].id' /data/unifi-core/config/cache/users.json)" \
+            -H "X-UserRole: owner" \
+            -H "X-UserAccessMask: 114654" \
+            -H "X-UserPermissionMask: 16382"'''
+        stdout, stderr = await self.execute_command(cmd)
+        if not stdout.strip():
+            _LOGGER.debug("Backup API returned empty response for %s %s", method, endpoint)
+            return {}
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError as err:
+            _LOGGER.warning("Failed to parse backup API response: %s", err)
+            return {}
+
+    async def update_backup_task(self, task_id: str, updates: dict) -> dict:
+        payload = json.dumps(updates)
+        escaped_payload = shlex.quote(payload)
+        cmd = f'''curl -s -X PATCH "http://localhost:16080/api/v1/remote-backup/tasks/{task_id}" \
+            -H "Content-Type: application/json" \
+            -H "X-UserId: $(jq -r '.[0].id' /data/unifi-core/config/cache/users.json)" \
+            -H "X-UserRole: owner" \
+            -H "X-UserAccessMask: 114654" \
+            -H "X-UserPermissionMask: 16382" \
+            -d {escaped_payload}'''
+        stdout, stderr = await self.execute_command(cmd)
+        if not stdout.strip():
+            return {}
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError as err:
+            _LOGGER.warning("Failed to parse backup API update response: %s", err)
+            return {}
