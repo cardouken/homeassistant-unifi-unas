@@ -184,9 +184,11 @@ class UNASTempMetricSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
 
-        if (last_state := await self.async_get_last_state()) is not None and last_state.state in self._attr_options:
-            self._current_option = last_state.state
-        else:
+        if (last_state := await self.async_get_last_state()) is not None:
+            if last_state.state in self._attr_options:
+                self._current_option = last_state.state
+            self._current_mode = last_state.attributes.get("current_mode")
+        if self._current_option is None:
             self._current_option = TEMP_METRIC_MAX
 
         @callback
@@ -264,6 +266,13 @@ class UNASTempMetricSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
     def current_option(self) -> str | None:
         return self._current_option
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        attrs = {}
+        if self._current_mode is not None:
+            attrs["current_mode"] = self._current_mode
+        return attrs
+
     async def async_select_option(self, option: str) -> None:
         mqtt_value = "avg" if option == TEMP_METRIC_AVG else "max"
         await self._publish_metric(mqtt_value)
@@ -301,9 +310,11 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
 
-        if (last_state := await self.async_get_last_state()) is not None and last_state.state in self._attr_options:
-            self._current_option = last_state.state
-        else:
+        if (last_state := await self.async_get_last_state()) is not None:
+            if last_state.state in self._attr_options:
+                self._current_option = last_state.state
+            self._current_mode = last_state.attributes.get("current_mode")
+        if self._current_option is None:
             self._current_option = RESPONSE_BALANCED
 
         @callback
@@ -389,6 +400,13 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
     @property
     def current_option(self) -> str | None:
         return self._current_option
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        attrs = {}
+        if self._current_mode is not None:
+            attrs["current_mode"] = self._current_mode
+        return attrs
 
     async def async_select_option(self, option: str) -> None:
         mqtt_value = self._option_to_mqtt(option)

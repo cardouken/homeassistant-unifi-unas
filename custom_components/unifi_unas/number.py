@@ -174,7 +174,7 @@ class UNASFanSpeedNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
-class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
+class UNASFanCurveNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
     def __init__(
         self,
         coordinator: UNASDataUpdateCoordinator,
@@ -219,6 +219,13 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
+
+        if (last_state := await self.async_get_last_state()) is not None:
+            try:
+                self._attr_native_value = int(float(last_state.state))
+            except (ValueError, TypeError):
+                pass
+            self._current_mode = last_state.attributes.get("current_mode")
 
         @callback
         def message_received(msg):
@@ -300,6 +307,13 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity):
             return self._current_mode in ["auto", "target_temp"]
 
         return True
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        attrs = {}
+        if self._current_mode is not None:
+            attrs["current_mode"] = self._current_mode
+        return attrs
 
     async def async_set_native_value(self, value: float) -> None:
         value = int(value)
