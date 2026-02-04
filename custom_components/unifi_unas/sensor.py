@@ -883,12 +883,12 @@ class UNASBackupLastRunSensor(CoordinatorEntity, SensorEntity):
         if not task:
             return None
         last_run = task.get("lastTaskRun", {})
-        finished_at = last_run.get("finishedAt")
-        if finished_at:
+        started_at = last_run.get("startedAt")
+        if started_at:
             try:
-                return datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+                return datetime.fromisoformat(started_at.replace("Z", "+00:00"))
             except (ValueError, AttributeError):
-                return None
+                pass
         return None
 
 
@@ -936,6 +936,7 @@ class UNASBackupDurationSensor(CoordinatorEntity, SensorEntity):
         self._attr_native_unit_of_measurement = UnitOfTime.SECONDS
         self._attr_icon = "mdi:timer-outline"
         self._attr_device_info = _get_backup_device_info(coordinator, task)
+        self._cached_duration = None
 
     @property
     def available(self):
@@ -943,7 +944,9 @@ class UNASBackupDurationSensor(CoordinatorEntity, SensorEntity):
         if not task:
             return False
         last_run = task.get("lastTaskRun", {})
-        return last_run.get("startedAt") and last_run.get("finishedAt")
+        if last_run.get("startedAt") and last_run.get("finishedAt"):
+            return True
+        return self._cached_duration is not None
 
     @property
     def native_value(self):
@@ -953,14 +956,14 @@ class UNASBackupDurationSensor(CoordinatorEntity, SensorEntity):
         last_run = task.get("lastTaskRun", {})
         started = last_run.get("startedAt")
         finished = last_run.get("finishedAt")
-        if not started or not finished:
-            return None
-        try:
-            start_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
-            end_dt = datetime.fromisoformat(finished.replace("Z", "+00:00"))
-            return int((end_dt - start_dt).total_seconds())
-        except (ValueError, AttributeError):
-            return None
+        if started and finished:
+            try:
+                start_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                end_dt = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+                self._cached_duration = int((end_dt - start_dt).total_seconds())
+            except (ValueError, AttributeError):
+                pass
+        return self._cached_duration
 
 
 class UNASBackupDestinationSensor(CoordinatorEntity, SensorEntity):
