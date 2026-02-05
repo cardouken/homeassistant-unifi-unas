@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import timedelta
 
@@ -9,9 +8,11 @@ from packaging.version import Version, InvalidVersion
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.components import mqtt
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.loader import async_get_integration
 
 from .const import (
     DOMAIN,
@@ -73,8 +74,6 @@ async def _cleanup_old_mqtt_configs_on_upgrade(
 ) -> None:
     if not PERFORM_MQTT_CLEANUP:
         return
-
-    from homeassistant.loader import async_get_integration
 
     integration = await async_get_integration(hass, DOMAIN)
     current_version = str(integration.version)
@@ -158,27 +157,44 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mqtt_password=entry.data.get(CONF_MQTT_PASSWORD),
     )
 
-    await manager.connect()
-    _LOGGER.info("SSH connection established to %s", entry.data[CONF_HOST])
-
-    from homeassistant.loader import async_get_integration
-
     integration = await async_get_integration(hass, DOMAIN)
     current_version = str(integration.version)
     last_deploy_version = entry.data.get(LAST_DEPLOY_VERSION_KEY)
-    scripts_installed = await manager.scripts_installed()
     is_dev_version = '-dev' in current_version
     device_model = entry.data[CONF_DEVICE_MODEL]
+    is_existing_installation = last_deploy_version is not None
 
-    if last_deploy_version != current_version or not scripts_installed or is_dev_version:
-        mqtt_root = get_mqtt_topics(entry.entry_id)["root"]
-        await manager.deploy_scripts(device_model, mqtt_root)
-        new_data = dict(entry.data)
-        new_data[LAST_DEPLOY_VERSION_KEY] = current_version
-        hass.config_entries.async_update_entry(entry, data=new_data)
+    ssh_connected = False
+    try:
+        await manager.connect()
+        ssh_connected = True
+        _LOGGER.info("SSH connection established to %s", entry.data[CONF_HOST])
+
+        scripts_installed = await manager.scripts_installed()
+        if last_deploy_version != current_version or not scripts_installed or is_dev_version:
+            mqtt_root = get_mqtt_topics(entry.entry_id)["root"]
+            await manager.deploy_scripts(device_model, mqtt_root)
+            new_data = dict(entry.data)
+            new_data[LAST_DEPLOY_VERSION_KEY] = current_version
+            hass.config_entries.async_update_entry(entry, data=new_data)
+
+    except Exception as err:
+        if not is_existing_installation:
+            raise ConfigEntryNotReady(
+                f"Cannot connect to UNAS at {entry.data[CONF_HOST]} for initial setup: {err}"
+            ) from err
+        _LOGGER.warning(
+            "UNAS at %s is offline, will reconnect when available: %s",
+            entry.data[CONF_HOST],
+            err,
+        )
+
+    pending_script_deploy = not ssh_connected and (
+        last_deploy_version != current_version or is_dev_version
+    )
 
     mqtt_client_instance = UNASMQTTClient(hass, entry.entry_id)
-    coordinator = UNASDataUpdateCoordinator(hass, manager, mqtt_client_instance, entry)
+    coordinator = UNASDataUpdateCoordinator(hass, manager, mqtt_client_instance, entry, pending_script_deploy)
     mqtt_client_instance._coordinator = coordinator
 
     await coordinator.async_config_entry_first_refresh()
@@ -248,10 +264,12 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
         ssh_manager: SSHManager,
         mqtt_client: UNASMQTTClient,
         entry: ConfigEntry,
+        pending_script_deploy: bool = False,
     ) -> None:
         self.ssh_manager = ssh_manager
         self.mqtt_client = mqtt_client
         self.entry = entry
+        self.pending_script_deploy = pending_script_deploy
         self.discovered_bays: set[str] = set()
         self.discovered_nvmes: set[str] = set()
         self.discovered_pools: set[str] = set()
@@ -293,11 +311,18 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             scripts_installed = await self.ssh_manager.scripts_installed()
 
-            if not scripts_installed:
-                _LOGGER.warning("Scripts missing, reinstalling...")
+            if not scripts_installed or self.pending_script_deploy:
+                reason = "missing" if not scripts_installed else "pending upgrade"
+                _LOGGER.info("Scripts %s, deploying...", reason)
                 device_model = self.entry.data[CONF_DEVICE_MODEL]
                 mqtt_root = get_mqtt_topics(self.entry.entry_id)["root"]
                 await self.ssh_manager.deploy_scripts(device_model, mqtt_root)
+                self.pending_script_deploy = False
+                integration = await async_get_integration(self.hass, DOMAIN)
+                new_data = dict(self.entry.data)
+                new_data[LAST_DEPLOY_VERSION_KEY] = str(integration.version)
+                self.hass.config_entries.async_update_entry(self.entry, data=new_data)
+                scripts_installed = True
 
             monitor_running = await self.ssh_manager.service_running("unas_monitor")
             fan_control_running = await self.ssh_manager.service_running("fan_control")
