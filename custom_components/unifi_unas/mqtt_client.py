@@ -201,6 +201,8 @@ class UNASMQTTClient:
             _LOGGER.warning("Failed to parse JSON attributes for %s", key)
 
     def is_available(self) -> bool:
+        if self._status == "offline":
+            return False
         if self._last_update is None:
             return False
 
