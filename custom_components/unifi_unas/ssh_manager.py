@@ -100,7 +100,10 @@ class SSHManager:
 
     async def scripts_installed(self) -> bool:
         stdout, _ = await self.execute_command(
-            "test -f /root/unas_monitor.py && test -f /root/fan_control.sh && echo 'yes' || echo 'no'"
+            "test -f /root/unas_monitor.py && test -f /root/fan_control.sh "
+            "&& python3 -c 'import paho.mqtt.client' 2>/dev/null "
+            "&& which mosquitto_sub >/dev/null 2>&1 "
+            "&& echo 'yes' || echo 'no'"
         )
         installed = stdout.strip() == "yes"
         _LOGGER.debug("Scripts installed: %s", installed)
