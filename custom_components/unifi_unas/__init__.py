@@ -273,6 +273,7 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
         self.discovered_bays: set[str] = set()
         self.discovered_nvmes: set[str] = set()
         self.discovered_pools: set[str] = set()
+        self.discovered_shares: set[str] = set()
         self.discovered_backup_task_sensors: set[str] = set()
         self.discovered_backup_task_buttons: set[str] = set()
         self.discovered_backup_task_switches: set[str] = set()
@@ -349,11 +350,13 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
                     _discover_and_add_drive_sensors,
                     _discover_and_add_nvme_sensors,
                     _discover_and_add_pool_sensors,
+                    _discover_and_add_share_sensors,
                     _discover_and_add_backup_sensors,
                 )
                 await _discover_and_add_drive_sensors(self, self.sensor_add_entities)
                 await _discover_and_add_nvme_sensors(self, self.sensor_add_entities)
                 await _discover_and_add_pool_sensors(self, self.sensor_add_entities)
+                await _discover_and_add_share_sensors(self, self.sensor_add_entities)
                 await _discover_and_add_backup_sensors(self, self.sensor_add_entities)
 
             if self.button_add_entities is not None:

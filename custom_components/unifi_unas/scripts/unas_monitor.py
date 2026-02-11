@@ -5,6 +5,7 @@ import subprocess
 import logging
 import json
 import fcntl
+import http.client
 from pathlib import Path
 import paho.mqtt.client as mqtt  # type: ignore  # installed on UNAS, not HA
 
@@ -27,6 +28,7 @@ MQTT_NVME = f"{MQTT_ROOT}/nvme"
 MQTT_POOL = f"{MQTT_ROOT}/pool"
 MQTT_SMB = f"{MQTT_ROOT}/smb"
 MQTT_NFS = f"{MQTT_ROOT}/nfs"
+MQTT_SHARE = f"{MQTT_ROOT}/share"
 MQTT_CONTROL = f"{MQTT_ROOT}/control"
 MONITOR_INTERVAL_TOPIC = f"{MQTT_CONTROL}/monitor_interval"
 SHARED_TEMP_FILE = "/tmp/unas_hdd_temp"
@@ -109,6 +111,8 @@ class UNASMonitor:
         if not self._connected:
             logger.warning("MQTT not connected after 30s - will keep retrying in background")
 
+        self._admin_uid = None
+        self._api_warned = False
         self.bay_cache = {}
         self.known_drives = set()
         self.previous_drive_map = {}  # serial -> bay
@@ -162,6 +166,109 @@ class UNASMonitor:
     
     def publish_pool(self, pool_num, metric, value):
         self.mqtt.publish(f"{MQTT_POOL}/{pool_num}/{metric}", str(value), retain=True)
+
+    def publish_share(self, name, metric, value):
+        self.mqtt.publish(f"{MQTT_SHARE}/{name}/{metric}", str(value), retain=True)
+
+    def _get_admin_user_id(self):
+        if self._admin_uid:
+            return self._admin_uid
+        try:
+            with open('/data/unifi-core/config/cache/users.json') as f:
+                users = json.load(f)
+            if users and isinstance(users, list):
+                self._admin_uid = users[0].get('id')
+                return self._admin_uid
+        except (OSError, json.JSONDecodeError, KeyError, IndexError):
+            pass
+        return None
+
+    def _fetch_api(self, path, need_auth=False):
+        try:
+            conn = http.client.HTTPConnection('127.0.0.1', 16080, timeout=5)
+            headers = {}
+            if need_auth:
+                uid = self._get_admin_user_id()
+                if not uid:
+                    if not self._api_warned:
+                        logger.warning("Cannot determine admin user ID for Drive API auth")
+                        self._api_warned = True
+                    return None
+                headers['X-UserId'] = uid
+                headers['X-UserRole'] = 'admin'
+            conn.request('GET', path, headers=headers)
+            resp = conn.getresponse()
+            if resp.status == 200:
+                return json.loads(resp.read())
+            if not self._api_warned:
+                logger.warning("Drive API %s returned %d", path, resp.status)
+                self._api_warned = True
+        except (OSError, json.JSONDecodeError) as e:
+            if not self._api_warned:
+                logger.warning("Drive API unavailable (%s), falling back to df", e)
+                self._api_warned = True
+        return None
+
+    def get_pools_from_api(self):
+        data = self._fetch_api('/api/v2/storage')
+        if not data or 'pools' not in data:
+            return self.get_pools()
+
+        pools = []
+        for pool in data['pools']:
+            capacity = pool.get('capacity', 0)
+            usage = pool.get('usage', 0)
+            capacity_gb = round(capacity / (1024 ** 3))
+            usage_gb = round(usage / (1024 ** 3))
+            available_gb = capacity_gb - usage_gb
+            usage_pct = round((usage / capacity) * 100) if capacity else 0
+            raid_groups = pool.get('raidGroups', [])
+            raid_level = raid_groups[0].get('currentLevel', 'unknown') if raid_groups else 'unknown'
+            protection = raid_groups[0].get('currentProtection', 0) if raid_groups else 0
+            pools.append({
+                'pool': pool.get('number', 1),
+                'size': capacity_gb,
+                'used': usage_gb,
+                'available': available_gb,
+                'usage': usage_pct,
+                'status': pool.get('status', 'unknown'),
+                'raid_level': raid_level,
+                'protection': protection,
+            })
+        return pools
+
+    def get_shares(self):
+        storage_data = self._fetch_api('/api/v2/storage')
+        pool_id_to_num = {}
+        if storage_data and 'pools' in storage_data:
+            for pool in storage_data['pools']:
+                pool_id_to_num[pool['id']] = pool.get('number', 1)
+
+        drives_data = self._fetch_api('/api/v2/drives', need_auth=True)
+        if not drives_data or 'drives' not in drives_data:
+            return []
+
+        shares = []
+        for drive in drives_data['drives']:
+            if drive.get('type') != 'shared':
+                continue
+            usage_bytes = drive.get('usage', 0)
+            quota_raw = drive.get('quota', -1)
+            protections = drive.get('protections', {})
+            pool_id = drive.get('storagePoolId', '')
+            pool_num = pool_id_to_num.get(pool_id, '?')
+            shares.append({
+                'name': drive.get('name', 'unknown'),
+                'usage': round(usage_bytes / (1024 ** 3), 2),
+                'quota': quota_raw,
+                'status': drive.get('status', 'unknown'),
+                'pool': str(pool_num),
+                'member_count': drive.get('memberCount', 0),
+                'snapshot_enabled': str(protections.get('snapshotEnabled', False)).lower(),
+                'encryption': protections.get('encryptionStatus', 'unknown'),
+                'backup_enabled': str(protections.get('remoteBackupEnabled', False)).lower(),
+            })
+        return shares
 
     def run_cmd(self, cmd, timeout=10):
         try:
@@ -611,13 +718,13 @@ class UNASMonitor:
             for key, value in nvme.items():
                 self.publish_nvme(slot, key, value)
 
-        pools = self.get_pools()
+        pools = self.get_pools_from_api()
         for pool in pools:
             pool_num = pool.pop('pool')
             for key, value in pool.items():
                 self.publish_pool(pool_num, key, value)
 
-        # UNVR doesn't have SMB/NFS shares
+        # UNVR doesn't have SMB/NFS/shares
         if DEVICE_MODEL != "UNVR":
             smb_connections = self.get_smb_connections()
             smb_shares = self.get_smb_shares()
@@ -646,6 +753,12 @@ class UNASMonitor:
 
             self.mqtt.publish(f"{MQTT_NFS}/mounts", str(nfs_data['count']), retain=True)
             self.mqtt.publish(f"{MQTT_NFS}/clients", json.dumps(nfs_data['clients']), retain=True)
+
+            shares = self.get_shares()
+            for share in shares:
+                name = share.pop('name')
+                for key, value in share.items():
+                    self.publish_share(name, key, value)
 
         drive_temps = [d.get('temperature', 0) for d in drives if 'temperature' in d]
         nvme_temps = [n.get('temperature', 0) for n in nvmes if 'temperature' in n]

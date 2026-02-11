@@ -92,4 +92,5 @@ def get_mqtt_topics(entry_id: str):
         "pool": f"{root}/pool",
         "smb": f"{root}/smb",
         "nfs": f"{root}/nfs",
+        "share": f"{root}/share",
     }

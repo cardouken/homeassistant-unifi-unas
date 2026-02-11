@@ -28,6 +28,7 @@ unas/system/{metric}                 → unas_{metric}                  → valu
 unas/hdd/{bay}/{metric}              → unas_hdd_{bay}_{metric}        → value
 unas/nvme/{slot}/{metric}            → unas_nvme_{slot}_{metric}      → value
 unas/pool/{num}/{metric}             → unas_pool{num}_{metric}        → value
+unas/share/{name}/{metric}           → unas_share_{name}_{metric}     → value
 unas/smb/connections                 → unas_smb_connections           → value
 unas/smb/clients                     → unas_smb_connections           → attributes
 unas/nfs/mounts                      → unas_nfs_mounts                → value
@@ -160,7 +161,11 @@ class UNASMQTTClient:
         # unas/pool/<num>/<metric>
         elif category == "pool":
             self._store_value(f"unas_pool{identifier}_{metric}", payload)
-        
+
+        # unas/share/<name>/<metric>
+        elif category == "share":
+            self._store_value(f"unas_share_{identifier}_{metric}", payload)
+
         # unas/control/fan/mode
         elif category == "control" and identifier == "fan" and metric == "mode":
             self._store_value("fan_mode", payload)
