@@ -31,9 +31,6 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
 ## Known Limitations
 
 - **Device Model** - Cannot be changed after initial setup. Changing requires removing and re-adding the integration.
-- **Storage Pool Names** - Pool names cannot be retrieved via SSH. Pools are numbered based on their underlying volume
-  UUID (sorted alphabetically), which in some cases may not match the names shown in UniFi Drive. If pool names are
-  incorrect, simply rename the entities in Home Assistant.
 
 ## Supported Devices
 
@@ -94,7 +91,9 @@ improve device support!
   version
 - **Drives (HDD)** - Temperature, SMART health status, model, serial, firmware, RPM, power-on hours, bad sectors
 - **Drives (NVMe)** - Temperature, SMART health, percentage used (wear), available spare, media errors, unsafe shutdowns
-- **Storage** - Pool usage, size, available space
+- **Storage** - Pool usage, size, available space, status, RAID level
+- **Shares** - Per-share usage, quota (or unlimited), storage pool, member count (with member details as
+  attributes), snapshot status, encryption status
 - **Network** - SMB connection count (with client details as attributes), NFS mount count (with share details as
   attributes)
 - **Backup Tasks** - Status, progress percentage, last run time, next scheduled run, source/destination paths
@@ -407,6 +406,7 @@ unas/{id}/
 ├── hdd/{bay}/            # Per-drive SMART data
 ├── nvme/{slot}/          # NVMe drive data
 ├── pool/{num}/           # Storage pool stats
+├── share/{name}/         # Per-share usage, quota, members
 ├── smb/                  # SMB connections
 ├── nfs/                  # NFS mounts
 └── control/
