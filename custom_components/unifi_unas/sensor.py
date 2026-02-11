@@ -181,12 +181,23 @@ STORAGE_POOL_SENSORS = [
         None,
         "mdi:check-circle",
     ),
+    (
+        "raid_level",
+        "RAID Level",
+        None,
+        None,
+        None,
+        "mdi:database",
+    ),
 ]
 
 SHARE_SENSORS = [
     ("usage", "Usage", "GB", SensorDeviceClass.DATA_SIZE, SensorStateClass.MEASUREMENT, "mdi:folder"),
     ("quota", "Quota", "GB", None, None, "mdi:folder-lock"),
-    ("status", "Status", None, None, None, "mdi:check-circle"),
+    ("pool", "Storage Pool", None, None, None, "mdi:database"),
+    ("member_count", "Members", None, None, None, "mdi:account-multiple"),
+    ("snapshot_enabled", "Snapshots", None, None, None, "mdi:camera"),
+    ("encryption", "Encryption", None, None, None, "mdi:lock"),
 ]
 DRIVE_SENSORS = [
     (
@@ -440,7 +451,7 @@ async def _discover_and_add_pool_sensors(
                 if entity_id := entity_reg.async_get_entity_id("sensor", DOMAIN, unique_id):
                     entity_reg.async_remove(entity_id)
                     _LOGGER.debug("Removed entity %s", entity_id)
-                
+
                 await mqtt.async_publish(
                     coordinator.hass,
                     f"{mqtt_root}/pool/{pool_num}/{sensor_suffix}",
@@ -448,6 +459,14 @@ async def _discover_and_add_pool_sensors(
                     qos=0,
                     retain=True,
                 )
+            # clear protection topic (attribute-only, no sensor)
+            await mqtt.async_publish(
+                coordinator.hass,
+                f"{mqtt_root}/pool/{pool_num}/protection",
+                "",
+                qos=0,
+                retain=True,
+            )
         
         _LOGGER.info("Removed entities for %d pools", len(missing_pools))
 
@@ -462,12 +481,8 @@ async def _discover_and_add_pool_sensors(
         for sensor_suffix, name, unit, device_class, state_class, icon in STORAGE_POOL_SENSORS:
             mqtt_key = f"unas_pool{pool_num}_{sensor_suffix}"
             full_name = f"Storage Pool {pool_num} {name}"
-            if sensor_suffix == "status":
-                entities.append(
-                    UNASPoolStatusSensor(coordinator, mqtt_key, full_name, pool_num, icon))
-            else:
-                entities.append(
-                    UNASSensor(coordinator, mqtt_key, full_name, unit, device_class, state_class, icon))
+            entities.append(
+                UNASSensor(coordinator, mqtt_key, full_name, unit, device_class, state_class, icon))
 
     if entities:
         async_add_entities(entities)
@@ -751,53 +766,6 @@ class UNASDriveSensor(CoordinatorEntity, SensorEntity):
         return mqtt_data.get(self._mqtt_key)
 
 
-class UNASPoolStatusSensor(CoordinatorEntity, SensorEntity):
-    def __init__(
-            self,
-            coordinator: UNASDataUpdateCoordinator,
-            mqtt_key: str,
-            name: str,
-            pool_num: str,
-            icon: str | None,
-    ) -> None:
-        super().__init__(coordinator)
-        self._mqtt_key = mqtt_key
-        self._pool_num = pool_num
-        self._attr_has_entity_name = True
-        self._attr_name = name
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_{mqtt_key}"
-        if icon:
-            self._attr_icon = icon
-
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.entry.entry_id)},
-            name=device_name,
-            manufacturer="Ubiquiti",
-            model=device_model,
-        )
-
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
-        self._attr_native_value = mqtt_data.get(self._mqtt_key)
-        self._attr_extra_state_attributes = {
-            "raid_level": mqtt_data.get(f"unas_pool{self._pool_num}_raid_level"),
-            "protection": mqtt_data.get(f"unas_pool{self._pool_num}_protection"),
-        }
-        self.async_write_ha_state()
-
-    @property
-    def available(self) -> bool:
-        if not self.coordinator.mqtt_client.is_available():
-            return False
-        return self._mqtt_key in self.coordinator.data.get("mqtt_data", {})
-
-    @property
-    def native_value(self):
-        return self.coordinator.data.get("mqtt_data", {}).get(self._mqtt_key)
-
-
 class UNASShareSensor(CoordinatorEntity, SensorEntity):
     def __init__(
             self,
@@ -835,30 +803,30 @@ class UNASShareSensor(CoordinatorEntity, SensorEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
+        self._attr_native_value = self._resolve_value()
+        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        if self._sensor_suffix == "pool":
+            pool_num = mqtt_data.get(self._mqtt_key)
+            if pool_num is not None:
+                self._attr_extra_state_attributes = {
+                    "raid_level": mqtt_data.get(f"unas_pool{pool_num}_raid_level"),
+                    "protection": mqtt_data.get(f"unas_pool{pool_num}_protection"),
+                }
+        elif self._sensor_suffix == "member_count":
+            attr_key = f"{self._mqtt_key}_attributes"
+            if attr_key in mqtt_data:
+                self._attr_extra_state_attributes = {"members": mqtt_data[attr_key]}
+        self.async_write_ha_state()
+
+    def _resolve_value(self):
         mqtt_data = self.coordinator.data.get("mqtt_data", {})
         value = mqtt_data.get(self._mqtt_key)
-
         if self._sensor_suffix == "quota":
             if value is not None and int(value) == -1:
-                self._attr_native_value = "Unlimited"
                 self._attr_native_unit_of_measurement = None
-            else:
-                self._attr_native_value = value
-                self._attr_native_unit_of_measurement = "GB"
-        else:
-            self._attr_native_value = value
-
-        if self._sensor_suffix == "usage":
-            prefix = f"unas_share_{self._share_name}_"
-            pool_num = mqtt_data.get(f"{prefix}pool")
-            self._attr_extra_state_attributes = {
-                "storage_pool": f"Storage Pool {pool_num}" if pool_num else None,
-                "member_count": mqtt_data.get(f"{prefix}member_count"),
-                "snapshot_enabled": mqtt_data.get(f"{prefix}snapshot_enabled"),
-                "encryption": mqtt_data.get(f"{prefix}encryption"),
-                "backup_enabled": mqtt_data.get(f"{prefix}backup_enabled"),
-            }
-        self.async_write_ha_state()
+                return "Unlimited"
+            self._attr_native_unit_of_measurement = "GB"
+        return value
 
     @property
     def available(self) -> bool:
@@ -868,13 +836,7 @@ class UNASShareSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
-        value = mqtt_data.get(self._mqtt_key)
-        if self._sensor_suffix == "quota":
-            if value is not None and int(value) == -1:
-                return "Unlimited"
-            return value
-        return value
+        return self._resolve_value()
 
 
 async def _discover_and_add_share_sensors(
@@ -907,8 +869,8 @@ async def _discover_and_add_share_sensors(
                     entity_reg.async_remove(entity_id)
 
             # clear all retained share topics (including metadata)
-            for metric in ("usage", "quota", "status", "pool", "member_count",
-                           "snapshot_enabled", "encryption", "backup_enabled"):
+            for metric in ("usage", "quota", "pool", "member_count",
+                           "members", "snapshot_enabled", "encryption"):
                 await mqtt.async_publish(
                     coordinator.hass,
                     f"{mqtt_root}/share/{share_name}/{metric}",

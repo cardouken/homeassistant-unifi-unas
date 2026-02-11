@@ -237,6 +237,35 @@ class UNASMonitor:
             })
         return pools
 
+    def _get_user_map(self):
+        data = self._fetch_api('/api/v1/users')
+        if not data or 'data' not in data:
+            return {}, None
+        user_map = {}
+        console_owner = None
+        for u in data['data']:
+            uid = u['id']
+            name = u.get('fullName', u.get('firstName', 'Unknown'))
+            user_map[uid] = name
+            if console_owner is None:
+                console_owner = {'id': uid, 'name': name}
+        return user_map, console_owner
+
+    def _get_share_members(self, drive_id, member_count, user_map, console_owner):
+        detail = self._fetch_api(f'/api/v2/drives/{drive_id}', need_auth=True)
+        if not detail or 'members' not in detail:
+            return []
+        members = [
+            {"name": user_map.get(m['id'], 'Unknown'), "role": m.get('role', 'unknown')}
+            for m in detail['members']
+        ]
+        # console owner has implicit access to all shares but isn't in the members list
+        if console_owner and member_count > len(members):
+            listed_ids = {m['id'] for m in detail['members']}
+            if console_owner['id'] not in listed_ids:
+                members.insert(0, {"name": console_owner['name'], "role": "admin"})
+        return members
+
     def get_shares(self):
         storage_data = self._fetch_api('/api/v2/storage')
         pool_id_to_num = {}
@@ -248,6 +277,8 @@ class UNASMonitor:
         if not drives_data or 'drives' not in drives_data:
             return []
 
+        user_map, console_owner = self._get_user_map()
+
         shares = []
         for drive in drives_data['drives']:
             if drive.get('type') != 'shared':
@@ -257,16 +288,17 @@ class UNASMonitor:
             protections = drive.get('protections', {})
             pool_id = drive.get('storagePoolId', '')
             pool_num = pool_id_to_num.get(pool_id, '?')
+            member_count = drive.get('memberCount', 0)
+            members = self._get_share_members(drive['id'], member_count, user_map, console_owner)
             shares.append({
                 'name': drive.get('name', 'unknown'),
                 'usage': round(usage_bytes / (1024 ** 3), 2),
                 'quota': quota_raw,
-                'status': drive.get('status', 'unknown'),
                 'pool': str(pool_num),
                 'member_count': drive.get('memberCount', 0),
+                'members': json.dumps(members),
                 'snapshot_enabled': str(protections.get('snapshotEnabled', False)).lower(),
                 'encryption': protections.get('encryptionStatus', 'unknown'),
-                'backup_enabled': str(protections.get('remoteBackupEnabled', False)).lower(),
             })
         return shares
 

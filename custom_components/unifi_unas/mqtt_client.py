@@ -164,7 +164,10 @@ class UNASMQTTClient:
 
         # unas/share/<name>/<metric>
         elif category == "share":
-            self._store_value(f"unas_share_{identifier}_{metric}", payload)
+            if metric == "members":
+                self._store_attributes(f"unas_share_{identifier}_member_count", payload)
+            else:
+                self._store_value(f"unas_share_{identifier}_{metric}", payload)
 
         # unas/control/fan/mode
         elif category == "control" and identifier == "fan" and metric == "mode":
