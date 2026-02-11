@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -19,6 +19,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
@@ -128,9 +129,9 @@ UNAS_SENSORS = [
     (
         "unas_uptime",
         "Uptime",
-        UnitOfTime.SECONDS,
-        SensorDeviceClass.DURATION,
-        SensorStateClass.TOTAL_INCREASING,
+        None,
+        SensorDeviceClass.TIMESTAMP,
+        None,
         None,
     ),
     ("unas_os_version", "UniFi OS Version", None, None, None, "mdi:information"),
@@ -487,6 +488,8 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
     ) -> None:
         super().__init__(coordinator)
         self._mqtt_key = mqtt_key
+        self._last_uptime_raw = None
+        self._boot_timestamp = None
         self._attr_has_entity_name = True
         self._attr_name = name
         self._attr_unique_id = f"{coordinator.entry.entry_id}_{mqtt_key}"
@@ -497,9 +500,6 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
             self._attr_icon = icon
         if device_class == SensorDeviceClass.TEMPERATURE:
             self._attr_suggested_display_precision = 0
-        if device_class == SensorDeviceClass.DURATION:
-            # uptime
-            self._attr_suggested_unit_of_measurement = UnitOfTime.DAYS
         if device_class == SensorDeviceClass.DATA_SIZE:
             # storage pools
             if unit == "GB":
@@ -535,7 +535,17 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        return self.coordinator.data.get("mqtt_data", {}).get(self._mqtt_key)
+        raw = self.coordinator.data.get("mqtt_data", {}).get(self._mqtt_key)
+        if raw is not None and self._mqtt_key == "unas_uptime":
+            try:
+                uptime_secs = int(float(raw))
+                if self._boot_timestamp is None or uptime_secs < (self._last_uptime_raw or 0):
+                    self._boot_timestamp = dt_util.utcnow() - timedelta(seconds=uptime_secs)
+                self._last_uptime_raw = uptime_secs
+                return self._boot_timestamp
+            except (ValueError, TypeError):
+                return None
+        return raw
 
 
 class UNASFanCurveVisualizationSensor(CoordinatorEntity, SensorEntity):
