@@ -118,6 +118,30 @@ class SSHManager:
         _LOGGER.debug("Service %s running: %s", service_name, running)
         return running
 
+    async def kick_native_fan_control(self) -> bool:
+        # uhwd (native fan daemon) calculates PID values but doesn't write them to sysfs until it receives an
+        # onFanProfileChanged event for some reason. Toggling the fan profile and back triggers this event, kicking uhwd
+        # into active control mode.
+        # Uses internal ustd APIs — returns False gracefully if they change.
+        #
+        # Mainly here to ensure that when fan control is given back to UNAS, it actually starts calculating new fan
+        # values. It seems like it doesn't always do this and gets stuck at whatever PWM it was set to earlier.
+        cmd = (
+            "python3 -c '"
+            "from ustd.tools.uhardware_fan import FanProfileManager; "
+            "fpm = FanProfileManager(); "
+            "cur = fpm.get_current_profile(); "
+            "alt = \"quiet\" if cur != \"quiet\" else \"default\"; "
+            "fpm.switch_profile(alt); "
+            "fpm.switch_profile(cur); "
+            "print(\"kicked\")' 2>&1"
+        )
+        stdout, _ = await self.execute_command(cmd)
+        success = "kicked" in stdout
+        if not success:
+            _LOGGER.warning("Failed to kick native fan control: %s", stdout.strip())
+        return success
+
     def _replace_mqtt_credentials(self, script: str, mqtt_root: str) -> str:
         replacements = {
             "MQTT_HOST": self.mqtt_host,

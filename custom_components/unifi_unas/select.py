@@ -141,6 +141,10 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
         if option == self._mode_managed:
             await self._publish_mode("unas_managed")
+            try:
+                await self.coordinator.ssh_manager.kick_native_fan_control()
+            except Exception as err:
+                _LOGGER.warning("Could not kick native fan control (non-critical): %s", err)
         elif option == MODE_CUSTOM_CURVE:
             await self._publish_mode("auto")
         elif option == MODE_TARGET_TEMP:
