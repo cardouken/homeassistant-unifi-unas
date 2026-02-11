@@ -370,6 +370,10 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.debug("Could not fetch backup tasks: %s", err)
                 data["backup_tasks"] = []
 
+        except Exception as err:
+            _LOGGER.warning("SSH connection temporarily unavailable: %s", err)
+
+        try:
             if self.sensor_add_entities is not None:
                 from .sensor import (
                     _discover_and_add_drive_sensors,
@@ -391,11 +395,16 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
             if self.switch_add_entities is not None:
                 from .switch import _discover_and_add_backup_switches
                 await _discover_and_add_backup_switches(self, self.switch_add_entities)
-
         except Exception as err:
-            _LOGGER.warning("SSH connection temporarily unavailable: %s", err)
+            _LOGGER.error("Error during entity discovery: %s", err)
 
         return data
+
+    def find_backup_task(self, task_id: str):
+        for task in self.data.get("backup_tasks", []):
+            if task["id"] == task_id:
+                return task
+        return None
 
     async def async_reinstall_scripts(self) -> None:
         device_model = self.entry.data[CONF_DEVICE_MODEL]
