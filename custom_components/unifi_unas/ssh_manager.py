@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import shlex
+from pathlib import Path
 from typing import Optional
 
 import aiofiles
@@ -13,7 +14,7 @@ from .const import HA_SSH_KEY_PATHS
 
 _LOGGER = logging.getLogger(__name__)
 
-SCRIPTS_DIR = __import__("pathlib").Path(__file__).parent / "scripts"
+SCRIPTS_DIR = Path(__file__).parent / "scripts"
 SSH_CONNECT_TIMEOUT = 30
 
 
@@ -151,8 +152,9 @@ class SSHManager:
         }
 
         for key, value in replacements.items():
-            # unas_monitor.py
-            script = script.replace(f'{key} = "REPLACE_ME"', f'{key} = "{value}"')
+            # unas_monitor.py — escape for Python string literal
+            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+            script = script.replace(f'{key} = "REPLACE_ME"', f'{key} = "{escaped}"')
             # fan_control.sh
             script = script.replace(f'{key}="REPLACE_ME"', f'{key}={shlex.quote(value)}')
 
@@ -176,7 +178,10 @@ class SSHManager:
                 monitor_script = self._replace_mqtt_credentials(monitor_script, mqtt_root)
                 fan_control_script = self._replace_mqtt_credentials(fan_control_script, mqtt_root)
 
-            monitor_script = monitor_script.replace('DEVICE_MODEL = "UNAS_PRO"', f'DEVICE_MODEL = "{device_model}"')
+            escaped_model = device_model.replace("\\", "\\\\").replace('"', '\\"')
+            monitor_script = monitor_script.replace(
+                'DEVICE_MODEL = "UNAS_PRO"', f'DEVICE_MODEL = "{escaped_model}"'
+            )
 
             await self._upload_file("/root/unas_monitor.py", monitor_script, executable=True)
             await self._upload_file("/etc/systemd/system/unas_monitor.service", monitor_service)
