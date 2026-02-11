@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -7,7 +8,7 @@ from packaging.version import Version, InvalidVersion
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.components import mqtt
@@ -26,6 +27,7 @@ from .const import (
     CONF_DEVICE_MODEL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_DEVICE_MODEL,
+    get_mqtt_root,
     get_mqtt_topics,
 )
 from .ssh_manager import SSHManager
@@ -223,10 +225,33 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
+async def _clear_retained_mqtt_topics(hass: HomeAssistant, entry_id: str) -> None:
+    if mqtt.DOMAIN not in hass.data:
+        return
+    mqtt_root = get_mqtt_root(entry_id)
+    collected: list[str] = []
+
+    @callback
+    def on_message(msg):
+        collected.append(msg.topic)
+
+    try:
+        unsub = await mqtt.async_subscribe(hass, f"{mqtt_root}/#", on_message, qos=0)
+        await asyncio.sleep(0.5)
+        unsub()
+        for topic in collected:
+            await mqtt.async_publish(hass, topic, "", qos=0, retain=True)
+        if collected:
+            _LOGGER.info("Cleared %d retained MQTT topics under %s", len(collected), mqtt_root)
+    except Exception:
+        _LOGGER.debug("Failed to clear retained MQTT topics for %s", mqtt_root)
+
+
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         data = hass.data[DOMAIN].pop(entry.entry_id)
         await data["mqtt_client"].async_unsubscribe()
+        await _clear_retained_mqtt_topics(hass, entry.entry_id)
 
         manager = data["ssh_manager"]
         try:
