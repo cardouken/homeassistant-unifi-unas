@@ -31,6 +31,7 @@ from .const import (
     DOMAIN,
     format_remote_type,
     format_schedule,
+    get_backup_device_info,
     get_device_info,
 )
 
@@ -974,25 +975,6 @@ async def _discover_and_add_backup_sensors(
         _LOGGER.info("Added %d sensors for %d new backup tasks", len(entities), len(new_tasks))
 
 
-def _find_backup_task(coordinator, task_id):
-    for task in coordinator.data.get("backup_tasks", []):
-        if task["id"] == task_id:
-            return task
-    return None
-
-
-def _get_backup_device_info(coordinator: UNASDataUpdateCoordinator, task: dict) -> DeviceInfo:
-    remote = task.get("remote", {})
-    return DeviceInfo(
-        identifiers={(DOMAIN, f"{coordinator.entry.entry_id}_backup_{task['id']}")},
-        name=f"UNAS Backup {task['name']}",
-        manufacturer=format_remote_type(remote.get("type")),
-        model=remote.get("oauth2Account") or task.get("destinationDir", ""),
-        entry_type=DeviceEntryType.SERVICE,
-        via_device=(DOMAIN, coordinator.entry.entry_id),
-    )
-
-
 class UNASBackupStatusSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
         super().__init__(coordinator)
@@ -1002,15 +984,15 @@ class UNASBackupStatusSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Status"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_status"
         self._attr_icon = "mdi:cloud-sync"
-        self._attr_device_info = _get_backup_device_info(coordinator, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
 
     @property
     def available(self):
-        return _find_backup_task(self.coordinator, self._task_id) is not None
+        return self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return None
         last_run = task.get("lastTaskRun", {})
@@ -1025,7 +1007,7 @@ class UNASBackupStatusSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return {}
         attrs = {
@@ -1055,15 +1037,15 @@ class UNASBackupLastRunSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_last_run"
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_icon = "mdi:clock-check"
-        self._attr_device_info = _get_backup_device_info(coordinator, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
 
     @property
     def available(self):
-        return _find_backup_task(self.coordinator, self._task_id) is not None
+        return self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return None
         last_run = task.get("lastTaskRun", {})
@@ -1085,11 +1067,11 @@ class UNASBackupNextRunSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_next_run"
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_icon = "mdi:clock-outline"
-        self._attr_device_info = _get_backup_device_info(coordinator, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
 
     @property
     def available(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return False
         schedule = task.get("schedule", {})
@@ -1097,7 +1079,7 @@ class UNASBackupNextRunSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return None
         next_backup = task.get("nextBackup")
@@ -1119,12 +1101,12 @@ class UNASBackupDurationSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.DURATION
         self._attr_native_unit_of_measurement = UnitOfTime.SECONDS
         self._attr_icon = "mdi:timer-outline"
-        self._attr_device_info = _get_backup_device_info(coordinator, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
         self._cached_duration = None
 
     @property
     def available(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return False
         last_run = task.get("lastTaskRun", {})
@@ -1134,7 +1116,7 @@ class UNASBackupDurationSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return None
         last_run = task.get("lastTaskRun", {})
@@ -1158,15 +1140,15 @@ class UNASBackupDestinationSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Destination"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_destination"
         self._attr_icon = "mdi:cloud-upload"
-        self._attr_device_info = _get_backup_device_info(coordinator, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
 
     @property
     def available(self):
-        return _find_backup_task(self.coordinator, self._task_id) is not None
+        return self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return None
         remote = task.get("remote", {})
@@ -1185,15 +1167,15 @@ class UNASBackupSourceSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Source"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_source"
         self._attr_icon = "mdi:folder-multiple"
-        self._attr_device_info = _get_backup_device_info(coordinator, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
 
     @property
     def available(self):
-        return _find_backup_task(self.coordinator, self._task_id) is not None
+        return self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return None
         source_dirs = task.get("sourceDirs", [])
@@ -1208,15 +1190,15 @@ class UNASBackupScheduleSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Schedule"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_schedule"
         self._attr_icon = "mdi:calendar-clock"
-        self._attr_device_info = _get_backup_device_info(coordinator, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
 
     @property
     def available(self):
-        return _find_backup_task(self.coordinator, self._task_id) is not None
+        return self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return None
         return format_schedule(task.get("schedule"))
@@ -1230,15 +1212,15 @@ class UNASBackupNameSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Task name"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_name"
         self._attr_icon = "mdi:tag"
-        self._attr_device_info = _get_backup_device_info(coordinator, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
 
     @property
     def available(self):
-        return _find_backup_task(self.coordinator, self._task_id) is not None
+        return self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return None
         return task.get("name")

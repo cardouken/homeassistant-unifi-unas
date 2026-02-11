@@ -13,6 +13,7 @@ from homeassistant.components import mqtt
 
 from . import UNASDataUpdateCoordinator
 from .const import CONF_DEVICE_MODEL, DOMAIN, get_device_info, get_mqtt_topics
+from .fan_mode import FanModeMixin
 
 DEFAULT_FAN_SPEED_50_PCT = 128
 
@@ -159,7 +160,7 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
-class UNASTempMetricSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
+class UNASTempMetricSelect(FanModeMixin, CoordinatorEntity, SelectEntity, RestoreEntity):
     """Select entity for choosing temperature metric (max or average) for Target Temp mode."""
 
     def __init__(self, coordinator: UNASDataUpdateCoordinator, hass: HomeAssistant) -> None:
@@ -172,8 +173,6 @@ class UNASTempMetricSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         self._attr_icon = "mdi:thermometer-lines"
         self._current_option = None
         self._unsubscribe = None
-        self._current_mode = None
-        self._unsubscribe_mode = None
 
         self._attr_options = [TEMP_METRIC_MAX, TEMP_METRIC_AVG]
 
@@ -210,24 +209,7 @@ class UNASTempMetricSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
             self.hass, f"{self._topics['control']}/fan/curve/temp_metric", message_received, qos=0
         )
 
-        @callback
-        def mode_message_received(msg):
-            payload = msg.payload
-            if payload == "unas_managed":
-                self._current_mode = "unas_managed"
-            elif payload == "auto":
-                self._current_mode = "auto"
-            elif payload == "target_temp":
-                self._current_mode = "target_temp"
-            elif payload.isdigit():
-                self._current_mode = "set_speed"
-            else:
-                self._current_mode = None
-            self.async_write_ha_state()
-
-        self._unsubscribe_mode = await mqtt.async_subscribe(
-            self.hass, f"{self._topics['control']}/fan/mode", mode_message_received, qos=0
-        )
+        await self._subscribe_fan_mode()
 
     async def _publish_metric(self, metric: str) -> None:
         try:
@@ -259,11 +241,7 @@ class UNASTempMetricSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
                 self._unsubscribe()
             except Exception as err:
                 _LOGGER.debug("Error unsubscribing from temp metric: %s", err)
-        if self._unsubscribe_mode:
-            try:
-                self._unsubscribe_mode()
-            except Exception as err:
-                _LOGGER.debug("Error unsubscribing from fan mode: %s", err)
+        self._unsubscribe_fan_mode()
         await super().async_will_remove_from_hass()
 
     @property
@@ -285,7 +263,7 @@ class UNASTempMetricSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
-class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
+class UNASResponseSpeedSelect(FanModeMixin, CoordinatorEntity, SelectEntity, RestoreEntity):
     """Select entity for choosing fan response speed preset."""
 
     def __init__(self, coordinator: UNASDataUpdateCoordinator, hass: HomeAssistant) -> None:
@@ -298,8 +276,6 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         self._attr_icon = "mdi:speedometer"
         self._current_option = None
         self._unsubscribe = None
-        self._current_mode = None
-        self._unsubscribe_mode = None
 
         self._attr_options = [RESPONSE_RELAXED, RESPONSE_BALANCED, RESPONSE_AGGRESSIVE]
 
@@ -338,24 +314,7 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
             self.hass, f"{self._topics['control']}/fan/curve/response_speed", message_received, qos=0
         )
 
-        @callback
-        def mode_message_received(msg):
-            payload = msg.payload
-            if payload == "unas_managed":
-                self._current_mode = "unas_managed"
-            elif payload == "auto":
-                self._current_mode = "auto"
-            elif payload == "target_temp":
-                self._current_mode = "target_temp"
-            elif payload.isdigit():
-                self._current_mode = "set_speed"
-            else:
-                self._current_mode = None
-            self.async_write_ha_state()
-
-        self._unsubscribe_mode = await mqtt.async_subscribe(
-            self.hass, f"{self._topics['control']}/fan/mode", mode_message_received, qos=0
-        )
+        await self._subscribe_fan_mode()
 
     def _option_to_mqtt(self, option: str) -> str:
         if option == RESPONSE_RELAXED:
@@ -394,11 +353,7 @@ class UNASResponseSpeedSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
                 self._unsubscribe()
             except Exception as err:
                 _LOGGER.debug("Error unsubscribing from response speed: %s", err)
-        if self._unsubscribe_mode:
-            try:
-                self._unsubscribe_mode()
-            except Exception as err:
-                _LOGGER.debug("Error unsubscribing from fan mode: %s", err)
+        self._unsubscribe_fan_mode()
         await super().async_will_remove_from_hass()
 
     @property

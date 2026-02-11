@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+
 DOMAIN = "unifi_unas"
 
 CONF_HOST = "host"
@@ -94,3 +96,15 @@ def get_mqtt_topics(entry_id: str):
         "nfs": f"{root}/nfs",
         "share": f"{root}/share",
     }
+
+
+def get_backup_device_info(entry_id: str, task: dict) -> DeviceInfo:
+    remote = task.get("remote", {})
+    return DeviceInfo(
+        identifiers={(DOMAIN, f"{entry_id}_backup_{task['id']}")},
+        name=f"UNAS Backup {task['name']}",
+        manufacturer=format_remote_type(remote.get("type")),
+        model=remote.get("oauth2Account") or task.get("destinationDir", ""),
+        entry_type=DeviceEntryType.SERVICE,
+        via_device=(DOMAIN, entry_id),
+    )

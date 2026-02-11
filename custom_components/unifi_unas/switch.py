@@ -7,10 +7,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
 from . import UNASDataUpdateCoordinator
-from .const import DOMAIN, format_remote_type
+from .const import DOMAIN, get_backup_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -72,13 +71,6 @@ async def _discover_and_add_backup_switches(
         _LOGGER.info("Added %d backup schedule switches", len(entities))
 
 
-def _find_backup_task(coordinator, task_id):
-    for task in coordinator.data.get("backup_tasks", []):
-        if task["id"] == task_id:
-            return task
-    return None
-
-
 class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
     def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
         super().__init__(coordinator)
@@ -88,25 +80,17 @@ class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_name = "Schedule enabled"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_schedule_enabled"
         self._attr_icon = "mdi:calendar-clock"
-        remote = task.get("remote", {})
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{coordinator.entry.entry_id}_backup_{self._task_id}")},
-            name=f"UNAS Backup {self._task_name}",
-            manufacturer=format_remote_type(remote.get("type")),
-            model=remote.get("oauth2Account") or task.get("destinationDir", ""),
-            entry_type=DeviceEntryType.SERVICE,
-            via_device=(DOMAIN, coordinator.entry.entry_id),
-        )
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
 
     @property
     def available(self):
         if not self.coordinator.data.get("ssh_connected", False):
             return False
-        return _find_backup_task(self.coordinator, self._task_id) is not None
+        return self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def is_on(self):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return False
         return task.get("schedule", {}).get("enable", False)
@@ -118,7 +102,7 @@ class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
         await self._set_schedule_enabled(False)
 
     async def _set_schedule_enabled(self, enabled):
-        task = _find_backup_task(self.coordinator, self._task_id)
+        task = self.coordinator.find_backup_task(self._task_id)
         if not task:
             return
         schedule = task.get("schedule", {}).copy()

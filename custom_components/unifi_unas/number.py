@@ -14,6 +14,7 @@ from homeassistant.components import mqtt
 
 from . import UNASDataUpdateCoordinator
 from .const import CONF_DEVICE_MODEL, DOMAIN, get_device_info, get_mqtt_topics
+from .fan_mode import FanModeMixin
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -51,7 +52,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class UNASFanSpeedNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
+class UNASFanSpeedNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreEntity):
     def __init__(
         self, coordinator: UNASDataUpdateCoordinator, hass: HomeAssistant
     ) -> None:
@@ -68,9 +69,7 @@ class UNASFanSpeedNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
         self._attr_native_unit_of_measurement = "%"
         self._attr_mode = NumberMode.SLIDER
         self._current_value = None
-        self._current_mode = None
         self._unsubscribe_speed = None
-        self._unsubscribe_mode = None
 
         device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
         self._attr_device_info = DeviceInfo(
@@ -99,34 +98,16 @@ class UNASFanSpeedNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
             except (ValueError, TypeError) as err:
                 _LOGGER.error("Failed to parse fan speed: %s", err)
 
-        @callback
-        def mode_message_received(msg):
-            payload = msg.payload
-            if payload == "unas_managed":
-                self._current_mode = "unas_managed"
-            elif payload == "auto":
-                self._current_mode = "auto"
-            elif payload == "target_temp":
-                self._current_mode = "target_temp"
-            elif payload.isdigit():
-                self._current_mode = "set_speed"
-            else:
-                self._current_mode = None
-            self.async_write_ha_state()
-
         self._unsubscribe_speed = await mqtt.async_subscribe(
             self.hass, f"{self._topics['system']}/fan_speed", speed_message_received, qos=0
         )
 
-        self._unsubscribe_mode = await mqtt.async_subscribe(
-            self.hass, f"{self._topics['control']}/fan/mode", mode_message_received, qos=0
-        )
+        await self._subscribe_fan_mode()
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe_speed:
             self._unsubscribe_speed()
-        if self._unsubscribe_mode:
-            self._unsubscribe_mode()
+        self._unsubscribe_fan_mode()
         await super().async_will_remove_from_hass()
 
     @property
@@ -174,7 +155,7 @@ class UNASFanSpeedNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
         self.async_write_ha_state()
 
 
-class UNASFanCurveNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
+class UNASFanCurveNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreEntity):
     def __init__(
         self,
         coordinator: UNASDataUpdateCoordinator,
@@ -206,8 +187,6 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
         self._is_fan_param = key in ["min_fan", "max_fan"]
 
         self._mqtt_topic = f"{self._topics['control']}/fan/curve/{key}"
-        self._current_mode = None
-        self._unsubscribe_mode = None
 
         device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
         self._attr_device_info = DeviceInfo(
@@ -245,24 +224,7 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
             self.hass, self._mqtt_topic, message_received, qos=0
         )
 
-        @callback
-        def mode_message_received(msg):
-            payload = msg.payload
-            if payload == "unas_managed":
-                self._current_mode = "unas_managed"
-            elif payload == "auto":
-                self._current_mode = "auto"
-            elif payload == "target_temp":
-                self._current_mode = "target_temp"
-            elif payload.isdigit():
-                self._current_mode = "set_speed"
-            else:
-                self._current_mode = None
-            self.async_write_ha_state()
-
-        self._unsubscribe_mode = await mqtt.async_subscribe(
-            self.hass, f"{self._topics['control']}/fan/mode", mode_message_received, qos=0
-        )
+        await self._subscribe_fan_mode()
 
         self.hass.loop.call_later(2.0, self._maybe_init_default)
 
@@ -282,8 +244,7 @@ class UNASFanCurveNumber(CoordinatorEntity, NumberEntity, RestoreEntity):
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe:
             self._unsubscribe()
-        if self._unsubscribe_mode:
-            self._unsubscribe_mode()
+        self._unsubscribe_fan_mode()
         await super().async_will_remove_from_hass()
 
     @property

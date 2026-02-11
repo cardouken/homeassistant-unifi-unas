@@ -8,10 +8,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from . import UNASDataUpdateCoordinator
-from .const import CONF_DEVICE_MODEL, DOMAIN, format_remote_type, get_device_info
+from .const import CONF_DEVICE_MODEL, DOMAIN, get_backup_device_info, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -160,15 +160,7 @@ class UNASBackupTriggerButton(CoordinatorEntity, ButtonEntity):
         self._attr_name = "Run backup"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}"
         self._attr_icon = "mdi:cloud-upload"
-        remote = task.get("remote", {})
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{coordinator.entry.entry_id}_backup_{self._task_id}")},
-            name=f"UNAS Backup {self._task_name}",
-            manufacturer=format_remote_type(remote.get("type")),
-            model=remote.get("oauth2Account") or task.get("destinationDir", ""),
-            entry_type=DeviceEntryType.SERVICE,
-            via_device=(DOMAIN, coordinator.entry.entry_id),
-        )
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
 
     @property
     def available(self) -> bool:
