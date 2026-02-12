@@ -670,6 +670,28 @@ fi
 
 log "$(cat "$STATE_FILE")"
 
+# Publish resolved state back to MQTT with retain so HA entities pick up the
+# correct initial values (especially after integration removal cleared topics)
+# shellcheck source=/dev/null
+source "$STATE_FILE"
+mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+    -t "${MQTT_FAN}/mode" -m "$FAN_MODE" 2>/dev/null || true
+mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+    -t "${MQTT_FAN}/curve/min_temp" -m "$MIN_TEMP" 2>/dev/null || true
+mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+    -t "${MQTT_FAN}/curve/max_temp" -m "$MAX_TEMP" 2>/dev/null || true
+mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+    -t "${MQTT_FAN}/curve/min_fan" -m "$MIN_FAN" 2>/dev/null || true
+mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+    -t "${MQTT_FAN}/curve/max_fan" -m "$MAX_FAN" 2>/dev/null || true
+mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+    -t "${MQTT_FAN}/curve/target_temp" -m "$TARGET_TEMP" 2>/dev/null || true
+mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+    -t "${MQTT_FAN}/curve/temp_metric" -m "$TEMP_METRIC" 2>/dev/null || true
+mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+    -t "${MQTT_FAN}/curve/response_speed" -m "$RESPONSE_SPEED" 2>/dev/null || true
+log "Published initial state to MQTT"
+
 # Start persistent MQTT subscription for updates
 mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
     -t "${MQTT_FAN}/mode" \
