@@ -11,7 +11,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from . import UNASDataUpdateCoordinator
-from .const import CONF_DEVICE_MODEL, DOMAIN, get_backup_device_info, get_device_info
+from .const import DOMAIN, get_backup_device_info, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class UNASReinstallScriptsButton(CoordinatorEntity, ButtonEntity):
         self._attr_name = "Reinstall Scripts"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_reinstall_scripts"
         self._attr_icon = "mdi:cog-refresh"
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,
@@ -64,7 +64,7 @@ class UNASRebootButton(CoordinatorEntity, ButtonEntity):
         self._attr_name = "Reboot"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_reboot"
         self._attr_icon = "mdi:restart"
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,
@@ -87,7 +87,7 @@ class UNASShutdownButton(CoordinatorEntity, ButtonEntity):
         self._attr_name = "Shutdown"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_shutdown"
         self._attr_icon = "mdi:power"
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,
@@ -160,7 +160,7 @@ class UNASBackupTriggerButton(CoordinatorEntity, ButtonEntity):
         self._attr_name = "Run backup"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}"
         self._attr_icon = "mdi:cloud-upload"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
 
     @property
     def available(self) -> bool:

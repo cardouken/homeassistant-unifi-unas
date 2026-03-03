@@ -12,7 +12,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.components import mqtt
 
 from . import UNASDataUpdateCoordinator
-from .const import CONF_DEVICE_MODEL, DOMAIN, get_device_info, get_mqtt_topics
+from .const import DOMAIN, get_device_info, get_mqtt_topics
 from .fan_mode import FanModeMixin
 
 DEFAULT_FAN_SPEED_50_PCT = 128
@@ -57,7 +57,7 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         self._last_pwm = None
         self._unsubscribe = None
 
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._mode_managed = f"{device_name} Managed"
         self._attr_options = [self._mode_managed, MODE_CUSTOM_CURVE, MODE_TARGET_TEMP, MODE_SET_SPEED]
         self._attr_device_info = DeviceInfo(
@@ -176,7 +176,7 @@ class UNASTempMetricSelect(FanModeMixin, CoordinatorEntity, SelectEntity, Restor
 
         self._attr_options = [TEMP_METRIC_MAX, TEMP_METRIC_AVG]
 
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,
@@ -279,7 +279,7 @@ class UNASResponseSpeedSelect(FanModeMixin, CoordinatorEntity, SelectEntity, Res
 
         self._attr_options = [RESPONSE_RELAXED, RESPONSE_BALANCED, RESPONSE_AGGRESSIVE]
 
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,

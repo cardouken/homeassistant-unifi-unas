@@ -33,6 +33,7 @@ from .const import (
     CONF_MQTT_PASSWORD,
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
+    CONF_DEVICE_NAME,
     DEVICE_MODELS,
     HA_SSH_KEY_PATHS,
     get_mqtt_topics,
@@ -54,6 +55,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
                 mode=SelectSelectorMode.DROPDOWN,
             )
         ),
+        vol.Optional(CONF_DEVICE_NAME, default="UNAS"): str,
         vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): NumberSelector(
             NumberSelectorConfig(
                 min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX
@@ -88,7 +90,16 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                                     user_input[CONF_MQTT_PASSWORD]):
                 errors["base"] = error_key
             else:
-                self.hass.config_entries.async_update_entry(entry, data=user_input)
+                await self.async_set_unique_id(user_input[CONF_HOST])
+                device_name = (
+                    user_input.get(CONF_DEVICE_NAME)
+                    or DEVICE_MODELS[user_input[CONF_DEVICE_MODEL]]
+                )
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    title=f"{device_name} ({user_input[CONF_HOST]})",
+                    data=user_input,
+                )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reconfigure_successful")
 
@@ -106,6 +117,10 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
+                vol.Optional(
+                    CONF_DEVICE_NAME,
+                    default=entry.data.get(CONF_DEVICE_NAME) or "UNAS",
+                ): str,
                 vol.Optional(CONF_SCAN_INTERVAL,
                              default=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): NumberSelector(
                     NumberSelectorConfig(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX)
@@ -137,9 +152,12 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(user_input[CONF_HOST])
                 self._abort_if_unique_id_configured()
 
-                model_name = DEVICE_MODELS[user_input[CONF_DEVICE_MODEL]]
+                device_name = (
+                    user_input.get(CONF_DEVICE_NAME)
+                    or DEVICE_MODELS[user_input[CONF_DEVICE_MODEL]]
+                )
                 return self.async_create_entry(
-                    title=f"{model_name} ({user_input[CONF_HOST]})",
+                    title=f"{device_name} ({user_input[CONF_HOST]})",
                     data=user_input,
                 )
 

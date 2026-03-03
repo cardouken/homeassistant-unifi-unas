@@ -12,10 +12,11 @@
           "mqtt_user": "MQTT Username (required)",
           "mqtt_password": "MQTT Password (required)",
           "device_model": "Device Model",
+          "device_name": "Device Name",
           "scan_interval": "Polling Interval (seconds, 5-60)"
         },
         "data_description": {
-          "device_model": "Select your UNAS model."
+          "device_name": "Optional custom name (e.g. UNAS Pro Hallway) - will be used for entity ID-s, e.g.: sensor.unas_pro_hallway_cpu_temperature"
         }
       },
       "reconfigure": {
@@ -29,10 +30,12 @@
           "mqtt_user": "MQTT Username (required)",
           "mqtt_password": "MQTT Password (required)",
           "device_model": "Device Model",
+          "device_name": "Device Name",
           "scan_interval": "Polling Interval (seconds, 5-60)"
         },
         "data_description": {
-          "device_model": "WARNING: Changing the device model requires deleting and re-adding the integration to update drive entities."
+          "device_model": "WARNING: Changing the device model requires deleting and re-adding the integration to update drive entities.",
+          "device_name": "Changes device display names only. Entity IDs are set at initial setup and cannot be changed here."
         }
       }
     },

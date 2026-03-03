@@ -80,7 +80,7 @@ class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_name = "Schedule enabled"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_schedule_enabled"
         self._attr_icon = "mdi:calendar-clock"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, task)
+        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
 
     @property
     def available(self):

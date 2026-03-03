@@ -8,7 +8,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from . import UNASDataUpdateCoordinator
-from .const import CONF_DEVICE_MODEL, DOMAIN, get_device_info
+from .const import DOMAIN, get_device_info
 
 
 async def async_setup_entry(
@@ -32,7 +32,7 @@ class UNASScriptsInstalledSensor(CoordinatorEntity, BinarySensorEntity):
         self._attr_name = "Scripts Installed"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_scripts_installed"
         self._attr_device_class = BinarySensorDeviceClass.RUNNING
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,
@@ -56,7 +56,7 @@ class UNASMonitorRunningSensor(CoordinatorEntity, BinarySensorEntity):
         self._attr_name = "Monitor Service"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_monitor_running"
         self._attr_device_class = BinarySensorDeviceClass.RUNNING
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,
@@ -80,7 +80,7 @@ class UNASFanControlRunningSensor(CoordinatorEntity, BinarySensorEntity):
         self._attr_name = "Fan Control Service"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_fan_control_running"
         self._attr_device_class = BinarySensorDeviceClass.RUNNING
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,

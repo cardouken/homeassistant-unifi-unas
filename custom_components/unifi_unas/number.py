@@ -13,7 +13,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.components import mqtt
 
 from . import UNASDataUpdateCoordinator
-from .const import CONF_DEVICE_MODEL, DOMAIN, get_device_info, get_mqtt_topics
+from .const import DOMAIN, get_device_info, get_mqtt_topics
 from .fan_mode import FanModeMixin
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class UNASFanSpeedNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreE
         self._current_value = None
         self._unsubscribe_speed = None
 
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,
@@ -188,7 +188,7 @@ class UNASFanCurveNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreE
 
         self._mqtt_topic = f"{self._topics['control']}/fan/curve/{key}"
 
-        device_name, device_model = get_device_info(coordinator.entry.data[CONF_DEVICE_MODEL])
+        device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
             name=device_name,

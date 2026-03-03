@@ -33,6 +33,7 @@ ATTR_MONITOR_RUNNING = "monitor_running"
 ATTR_FAN_CONTROL_RUNNING = "fan_control_running"
 
 CONF_DEVICE_MODEL = "device_model"
+CONF_DEVICE_NAME = "device_name"
 DEFAULT_DEVICE_MODEL = "UNAS_PRO"
 
 DEVICE_MODELS = {
@@ -45,10 +46,12 @@ DEVICE_MODELS = {
 }
 
 
-def get_device_info(device_model: str) -> tuple[str, str]:
+def get_device_info(entry_data: dict) -> tuple[str, str]:
+    device_model = entry_data[CONF_DEVICE_MODEL]
+    custom_name = entry_data.get(CONF_DEVICE_NAME)
     if device_model == "UNVR":
-        return "UNVR", "UniFi UNVR"
-    return "UNAS", "UniFi UNAS"
+        return custom_name or "UNVR", "UniFi UNVR"
+    return custom_name or "UNAS", "UniFi UNAS"
 
 
 REMOTE_TYPE_LABELS = {
@@ -98,11 +101,12 @@ def get_mqtt_topics(entry_id: str):
     }
 
 
-def get_backup_device_info(entry_id: str, task: dict) -> DeviceInfo:
+def get_backup_device_info(entry_id: str, entry_data: dict, task: dict) -> DeviceInfo:
     remote = task.get("remote", {})
+    device_name, _ = get_device_info(entry_data)
     return DeviceInfo(
         identifiers={(DOMAIN, f"{entry_id}_backup_{task['id']}")},
-        name=f"UNAS Backup {task['name']}",
+        name=f"{device_name} Backup {task['name']}",
         manufacturer=format_remote_type(remote.get("type")),
         model=remote.get("oauth2Account") or task.get("destinationDir", ""),
         entry_type=DeviceEntryType.SERVICE,
