@@ -97,7 +97,7 @@ class SSHManager:
             if self._conn is None:
                 raise ConnectionError("SSH connection not established")
             result = await self._conn.run(command, check=False)
-        return result.stdout, result.stderr
+        return getattr(result, "stdout", "") or "", getattr(result, "stderr", "") or ""
 
     async def scripts_installed(self) -> bool:
         stdout, _ = await self.execute_command(
