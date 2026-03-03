@@ -2,17 +2,17 @@ from __future__ import annotations
 
 import logging
 
+from homeassistant.components import mqtt
 from homeassistant.components.select import SelectEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.components import mqtt
 
 from . import UNASDataUpdateCoordinator
-from .const import DOMAIN, get_device_info, get_mqtt_topics
+from .const import CONF_DEVICE_MODEL, DOMAIN, get_device_info, get_mqtt_topics
 from .fan_mode import FanModeMixin
 
 DEFAULT_FAN_SPEED_50_PCT = 128
@@ -58,7 +58,8 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         self._unsubscribe = None
 
         device_name, device_model = get_device_info(coordinator.entry.data)
-        self._mode_managed = f"{device_name} Managed"
+        base_type = "UNVR" if coordinator.entry.data[CONF_DEVICE_MODEL] == "UNVR" else "UNAS"
+        self._mode_managed = f"{base_type} Managed"
         self._attr_options = [self._mode_managed, MODE_CUSTOM_CURVE, MODE_TARGET_TEMP, MODE_SET_SPEED]
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.entry.entry_id)},
