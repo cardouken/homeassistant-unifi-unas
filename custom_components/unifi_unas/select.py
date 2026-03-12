@@ -58,7 +58,7 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         self._unsubscribe = None
 
         device_name, device_model = get_device_info(coordinator.entry.data)
-        base_type = "UNVR" if coordinator.entry.data[CONF_DEVICE_MODEL] == "UNVR" else "UNAS"
+        base_type = "UNVR" if coordinator.entry.data[CONF_DEVICE_MODEL].startswith("UNVR") else "UNAS"
         self._mode_managed = f"{base_type} Managed"
         self._attr_options = [self._mode_managed, MODE_CUSTOM_CURVE, MODE_TARGET_TEMP, MODE_SET_SPEED]
         self._attr_device_info = DeviceInfo(

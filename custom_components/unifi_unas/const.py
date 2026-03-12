@@ -43,13 +43,14 @@ DEVICE_MODELS = {
     "UNAS_4": "UNAS 4",
     "UNAS_2": "UNAS 2",
     "UNVR": "UNVR",
+    "UNVR_PRO": "UNVR Pro",
 }
 
 
 def get_device_info(entry_data: dict) -> tuple[str, str]:
     device_model = entry_data[CONF_DEVICE_MODEL]
     custom_name = entry_data.get(CONF_DEVICE_NAME)
-    if device_model == "UNVR":
+    if device_model.startswith("UNVR"):
         return custom_name or "UNVR", "UniFi UNVR"
     return custom_name or "UNAS", "UniFi UNAS"
 
