@@ -63,7 +63,7 @@ BAY_MAPPINGS = {
         "3": "3",
         "4": "4"
     },
-    # UNAS 4 all unconfirmed, just assumed defaults to allow drive discovery even if mapped incorrectly
+    # UNAS 4 confirmed on reddit
     "UNAS_4": {
         "1": "1",
         "2": "2",
@@ -80,6 +80,16 @@ BAY_MAPPINGS = {
         "3": "4",
         "5": "2",
         "7": "1"
+    },
+    # UNVR Pro - user-reported mapping from issue #11
+    "UNVR_PRO": {
+        "1": "6",
+        "3": "7",
+        "4": "3",
+        "5": "5",
+        "6": "2",
+        "7": "4",
+        "8": "1"
     }
 }
 
@@ -327,7 +337,7 @@ class UNASMonitor:
             data['uptime'] = int(float(f.read().split()[0]))
 
         data['os_version'] = self.run_cmd(['dpkg-query', '-W', '-f=${Version}', 'unifi-core']).strip()
-        if DEVICE_MODEL == "UNVR":
+        if DEVICE_MODEL.startswith("UNVR"):
             data['protect_version'] = self.run_cmd(['dpkg-query', '-W', '-f=${Version}', 'unifi-protect']).strip()
         else:
             data['drive_version'] = self.run_cmd(['dpkg-query', '-W', '-f=${Version}', 'unifi-drive']).strip()
@@ -757,7 +767,7 @@ class UNASMonitor:
                 self.publish_pool(pool_num, key, value)
 
         # UNVR doesn't have SMB/NFS/shares
-        if DEVICE_MODEL != "UNVR":
+        if not DEVICE_MODEL.startswith("UNVR"):
             smb_connections = self.get_smb_connections()
             smb_shares = self.get_smb_shares()
 

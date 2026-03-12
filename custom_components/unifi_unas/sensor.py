@@ -263,7 +263,7 @@ async def async_setup_entry(
     coordinator: UNASDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
     device_model = entry.data[CONF_DEVICE_MODEL]
 
-    if device_model == "UNVR":
+    if device_model.startswith("UNVR"):
         excluded = {"unas_smb_connections", "unas_nfs_mounts", "unas_drive_version"}
     else:
         excluded = {"unas_protect_version"}
