@@ -17,7 +17,13 @@ CONF_PASSWORD = "password"
 CONF_MQTT_HOST = "mqtt_host"
 CONF_MQTT_USER = "mqtt_user"
 CONF_MQTT_PASSWORD = "mqtt_password"
+CONF_MQTT_PORT = "mqtt_port"
+CONF_MQTT_TLS = "mqtt_tls"
+CONF_MQTT_TLS_INSECURE = "mqtt_tls_insecure"
 CONF_SCAN_INTERVAL = "scan_interval"
+
+DEFAULT_MQTT_PORT = 1883
+DEFAULT_MQTT_TLS_PORT = 8883
 
 DEFAULT_USERNAME = "root"
 DEFAULT_SCAN_INTERVAL = 30

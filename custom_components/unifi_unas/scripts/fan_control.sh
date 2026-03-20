@@ -27,6 +27,18 @@ MQTT_HOST="REPLACE_ME"
 MQTT_USER="REPLACE_ME"
 MQTT_PASS="REPLACE_ME"
 MQTT_ROOT="REPLACE_ME"
+MQTT_PORT="REPLACE_ME"
+MQTT_TLS="REPLACE_ME"
+MQTT_TLS_INSECURE="REPLACE_ME"
+
+MQTT_TLS_OPTS=""
+if [ "$MQTT_TLS" = "true" ]; then
+    MQTT_TLS_OPTS="--capath /etc/ssl/certs"
+    if [ "$MQTT_TLS_INSECURE" = "true" ]; then
+        MQTT_TLS_OPTS="$MQTT_TLS_OPTS --insecure"
+    fi
+fi
+
 MQTT_SYSTEM="${MQTT_ROOT}/system"
 MQTT_CONTROL="${MQTT_ROOT}/control"
 MQTT_FAN="${MQTT_CONTROL}/fan"
@@ -195,7 +207,7 @@ publish_if_changed() {
     last_pwm=$(cat "$LAST_PWM_FILE" 2>/dev/null || echo "0")
 
     if [ "$new_pwm" != "$last_pwm" ]; then
-        mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
+        mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS \
             -t "${MQTT_SYSTEM}/fan_speed" -m "$new_pwm" 2>/dev/null || true
         echo "$new_pwm" > "$LAST_PWM_FILE"
     fi
@@ -646,7 +658,7 @@ log "Fan control service starting..."
 log "Fetching MQTT state..."
 MQTT_OUTPUT=""
 for i in {1..30}; do
-    MQTT_OUTPUT=$(timeout 5 mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
+    MQTT_OUTPUT=$(timeout 5 mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS \
         -t "${MQTT_FAN}/mode" \
         -t "${MQTT_FAN}/curve/+" \
         -C 8 \
@@ -674,26 +686,26 @@ log "$(cat "$STATE_FILE")"
 # correct initial values (especially after integration removal cleared topics)
 # shellcheck source=/dev/null
 source "$STATE_FILE"
-mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+mosquitto_pub $MQTT_CONN -r \
     -t "${MQTT_FAN}/mode" -m "$FAN_MODE" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+mosquitto_pub $MQTT_CONN -r \
     -t "${MQTT_FAN}/curve/min_temp" -m "$MIN_TEMP" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+mosquitto_pub $MQTT_CONN -r \
     -t "${MQTT_FAN}/curve/max_temp" -m "$MAX_TEMP" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+mosquitto_pub $MQTT_CONN -r \
     -t "${MQTT_FAN}/curve/min_fan" -m "$MIN_FAN" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+mosquitto_pub $MQTT_CONN -r \
     -t "${MQTT_FAN}/curve/max_fan" -m "$MAX_FAN" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+mosquitto_pub $MQTT_CONN -r \
     -t "${MQTT_FAN}/curve/target_temp" -m "$TARGET_TEMP" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+mosquitto_pub $MQTT_CONN -r \
     -t "${MQTT_FAN}/curve/temp_metric" -m "$TEMP_METRIC" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" -r \
+mosquitto_pub $MQTT_CONN -r \
     -t "${MQTT_FAN}/curve/response_speed" -m "$RESPONSE_SPEED" 2>/dev/null || true
 log "Published initial state to MQTT"
 
 # Start persistent MQTT subscription for updates
-mosquitto_sub -h "$MQTT_HOST" -u "$MQTT_USER" -P "$MQTT_PASS" \
+mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS \
     -t "${MQTT_FAN}/mode" \
     -t "${MQTT_FAN}/curve/+" \
     -F "%t %p" 2>/dev/null | while read -r topic payload; do

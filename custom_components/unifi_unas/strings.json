@@ -11,12 +11,25 @@
           "mqtt_host": "MQTT Broker IP Address",
           "mqtt_user": "MQTT Username (required)",
           "mqtt_password": "MQTT Password (required)",
+          "mqtt_tls": "Use TLS",
           "device_model": "Device Model",
           "device_name": "Device Name",
           "scan_interval": "Polling Interval (seconds, 5-60)"
         },
         "data_description": {
+          "mqtt_tls": "Only enable if your MQTT broker is configured for TLS (port 8883). Leave off for standard setups.",
           "device_name": "Optional custom name (e.g. UNAS Pro Hallway) - will be used for entity ID-s, e.g.: sensor.unas_pro_hallway_cpu_temperature"
+        }
+      },
+      "mqtt_tls": {
+        "title": "MQTT TLS Settings",
+        "description": "Configure TLS connection settings for your MQTT broker.",
+        "data": {
+          "mqtt_port": "MQTT Broker Port",
+          "mqtt_tls_insecure": "Allow untrusted certificate"
+        },
+        "data_description": {
+          "mqtt_tls_insecure": "Enable if your MQTT broker uses a self-signed certificate."
         }
       },
       "reconfigure": {
@@ -29,13 +42,26 @@
           "mqtt_host": "MQTT Broker IP Address",
           "mqtt_user": "MQTT Username (required)",
           "mqtt_password": "MQTT Password (required)",
+          "mqtt_tls": "Use TLS",
           "device_model": "Device Model",
           "device_name": "Device Name",
           "scan_interval": "Polling Interval (seconds, 5-60)"
         },
         "data_description": {
+          "mqtt_tls": "Only enable if your MQTT broker is configured for TLS (port 8883). Leave off for standard setups.",
           "device_model": "WARNING: Changing the device model requires deleting and re-adding the integration to update drive entities.",
           "device_name": "Changes device display names only. Entity IDs are set at initial setup and cannot be changed here."
+        }
+      },
+      "reconfigure_mqtt_tls": {
+        "title": "MQTT TLS Settings",
+        "description": "Configure TLS connection settings for your MQTT broker.",
+        "data": {
+          "mqtt_port": "MQTT Broker Port",
+          "mqtt_tls_insecure": "Allow untrusted certificate"
+        },
+        "data_description": {
+          "mqtt_tls_insecure": "Enable if your MQTT broker uses a self-signed certificate."
         }
       }
     },
@@ -47,6 +73,7 @@
       "mqtt_timeout": "MQTT connection timed out. Please verify the broker is running and accessible.",
       "mqtt_library_missing": "MQTT library not available. Please restart Home Assistant.",
       "model_changed": "Device model cannot be changed during reconfiguration. Please delete and re-add the integration to change the device model.",
+      "mqtt_tls_verify_failed": "TLS certificate verification failed. Enable 'Allow untrusted certificate' if your broker uses a self-signed certificate.",
       "unknown": "Unexpected error occurred. Please check the logs."
     },
     "abort": {

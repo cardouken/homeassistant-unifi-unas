@@ -8,6 +8,7 @@ import asyncssh
 import voluptuous as vol
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
@@ -26,11 +27,16 @@ from .const import (
     DEFAULT_USERNAME,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_DEVICE_MODEL,
+    DEFAULT_MQTT_PORT,
+    DEFAULT_MQTT_TLS_PORT,
     MIN_SCAN_INTERVAL,
     MAX_SCAN_INTERVAL,
     CONF_MQTT_HOST,
     CONF_MQTT_USER,
     CONF_MQTT_PASSWORD,
+    CONF_MQTT_PORT,
+    CONF_MQTT_TLS,
+    CONF_MQTT_TLS_INSECURE,
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
     CONF_DEVICE_NAME,
@@ -49,6 +55,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_MQTT_HOST): str,
         vol.Required(CONF_MQTT_USER): str,
         vol.Required(CONF_MQTT_PASSWORD): str,
+        vol.Optional(CONF_MQTT_TLS, default=False): BooleanSelector(),
         vol.Required(CONF_DEVICE_MODEL, default=DEFAULT_DEVICE_MODEL): SelectSelector(
             SelectSelectorConfig(
                 options=[{"value": k, "label": v} for k, v in DEVICE_MODELS.items()],
@@ -86,6 +93,10 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             elif error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
                                                    user_input.get(CONF_PASSWORD)):
                 errors["base"] = error_key
+            elif user_input.get(CONF_MQTT_TLS):
+                self._pending_input = user_input
+                self._reconfigure_entry = entry
+                return await self.async_step_reconfigure_mqtt_tls()
             elif error_key := await self._test_mqtt(user_input[CONF_MQTT_HOST], user_input[CONF_MQTT_USER],
                                                     user_input[CONF_MQTT_PASSWORD]):
                 errors["base"] = error_key
@@ -111,6 +122,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_MQTT_HOST, default=entry.data[CONF_MQTT_HOST]): str,
                 vol.Required(CONF_MQTT_USER, default=entry.data[CONF_MQTT_USER]): str,
                 vol.Required(CONF_MQTT_PASSWORD, default=entry.data[CONF_MQTT_PASSWORD]): str,
+                vol.Optional(CONF_MQTT_TLS, default=entry.data.get(CONF_MQTT_TLS, False)): BooleanSelector(),
                 vol.Required(CONF_DEVICE_MODEL, default=old_model): SelectSelector(
                     SelectSelectorConfig(
                         options=[{"value": k, "label": v} for k, v in DEVICE_MODELS.items()],
@@ -135,6 +147,52 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"host": entry.data[CONF_HOST]},
         )
 
+    async def async_step_reconfigure_mqtt_tls(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        errors: dict[str, str] = {}
+        entry = self._reconfigure_entry
+
+        if user_input is not None:
+            merged = {**self._pending_input, **user_input}
+            if error_key := await self._test_mqtt(
+                merged[CONF_MQTT_HOST], merged[CONF_MQTT_USER],
+                merged[CONF_MQTT_PASSWORD],
+                port=merged.get(CONF_MQTT_PORT, DEFAULT_MQTT_TLS_PORT),
+                use_tls=True,
+                tls_insecure=merged.get(CONF_MQTT_TLS_INSECURE, False),
+            ):
+                errors["base"] = error_key
+            else:
+                await self.async_set_unique_id(merged[CONF_HOST])
+                device_name = (
+                    merged.get(CONF_DEVICE_NAME)
+                    or DEVICE_MODELS[merged[CONF_DEVICE_MODEL]]
+                )
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    title=f"{device_name} ({merged[CONF_HOST]})",
+                    data=merged,
+                )
+                await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason="reconfigure_successful")
+
+        schema = vol.Schema({
+            vol.Optional(
+                CONF_MQTT_PORT,
+                default=entry.data.get(CONF_MQTT_PORT, DEFAULT_MQTT_TLS_PORT),
+            ): NumberSelector(
+                NumberSelectorConfig(min=1, max=65535, mode=NumberSelectorMode.BOX)
+            ),
+            vol.Optional(
+                CONF_MQTT_TLS_INSECURE,
+                default=entry.data.get(CONF_MQTT_TLS_INSECURE, False),
+            ): BooleanSelector(),
+        })
+        return self.async_show_form(
+            step_id="reconfigure_mqtt_tls", data_schema=schema, errors=errors
+        )
+
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
 
@@ -145,6 +203,9 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
                                                  user_input.get(CONF_PASSWORD)):
                 errors["base"] = error_key
+            elif user_input.get(CONF_MQTT_TLS):
+                self._pending_input = user_input
+                return await self.async_step_mqtt_tls()
             elif error_key := await self._test_mqtt(user_input[CONF_MQTT_HOST], user_input[CONF_MQTT_USER],
                                                     user_input[CONF_MQTT_PASSWORD]):
                 errors["base"] = error_key
@@ -162,6 +223,40 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
         return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
+
+    async def async_step_mqtt_tls(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            merged = {**self._pending_input, **user_input}
+            if error_key := await self._test_mqtt(
+                merged[CONF_MQTT_HOST], merged[CONF_MQTT_USER],
+                merged[CONF_MQTT_PASSWORD],
+                port=merged.get(CONF_MQTT_PORT, DEFAULT_MQTT_TLS_PORT),
+                use_tls=True,
+                tls_insecure=merged.get(CONF_MQTT_TLS_INSECURE, False),
+            ):
+                errors["base"] = error_key
+            else:
+                await self.async_set_unique_id(merged[CONF_HOST])
+                self._abort_if_unique_id_configured()
+
+                device_name = (
+                    merged.get(CONF_DEVICE_NAME)
+                    or DEVICE_MODELS[merged[CONF_DEVICE_MODEL]]
+                )
+                return self.async_create_entry(
+                    title=f"{device_name} ({merged[CONF_HOST]})",
+                    data=merged,
+                )
+
+        schema = vol.Schema({
+            vol.Optional(CONF_MQTT_PORT, default=DEFAULT_MQTT_TLS_PORT): NumberSelector(
+                NumberSelectorConfig(min=1, max=65535, mode=NumberSelectorMode.BOX)
+            ),
+            vol.Optional(CONF_MQTT_TLS_INSECURE, default=False): BooleanSelector(),
+        })
+        return self.async_show_form(step_id="mqtt_tls", data_schema=schema, errors=errors)
 
     async def _test_ssh(self, host: str, username: str, password: str | None) -> str | None:
         try:
@@ -197,7 +292,11 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except Exception:
             return "unknown"
 
-    async def _test_mqtt(self, host: str, username: str, password: str) -> str | None:
+    async def _test_mqtt(
+        self, host: str, username: str, password: str,
+        port: int = DEFAULT_MQTT_PORT, use_tls: bool = False,
+        tls_insecure: bool = False,
+    ) -> str | None:
         try:
             import paho.mqtt.client as mqtt_client
 
@@ -213,13 +312,23 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 def on_connect(_client, _userdata, _flags, rc):
                     result["rc"] = rc
                     _client.disconnect()
-            
+
+            import ssl
             client.username_pw_set(username, password)
+            if use_tls:
+                if tls_insecure:
+                    client.tls_set(cert_reqs=ssl.CERT_NONE)
+                    client.tls_insecure_set(True)
+                else:
+                    client.tls_set()
             client.on_connect = on_connect
 
             try:
-                client.connect(host, 1883, 60)
+                client.connect(host, int(port), 60)
             except Exception as e:
+                if isinstance(e, ssl.SSLCertVerificationError):
+                    _LOGGER.debug("MQTT TLS certificate verification failed: %s", e)
+                    return "mqtt_tls_verify_failed"
                 _LOGGER.debug("MQTT connection failed: %s", e)
                 return "mqtt_cannot_connect"
 

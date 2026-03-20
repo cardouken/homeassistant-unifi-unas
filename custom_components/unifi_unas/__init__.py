@@ -23,10 +23,14 @@ from .const import (
     CONF_MQTT_HOST,
     CONF_MQTT_USER,
     CONF_MQTT_PASSWORD,
+    CONF_MQTT_PORT,
+    CONF_MQTT_TLS,
+    CONF_MQTT_TLS_INSECURE,
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_DEVICE_MODEL,
+    DEFAULT_MQTT_PORT,
     get_mqtt_root,
     get_mqtt_topics,
 )
@@ -157,6 +161,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mqtt_host=entry.data.get(CONF_MQTT_HOST),
         mqtt_user=entry.data.get(CONF_MQTT_USER),
         mqtt_password=entry.data.get(CONF_MQTT_PASSWORD),
+        mqtt_port=entry.data.get(CONF_MQTT_PORT, DEFAULT_MQTT_PORT),
+        mqtt_tls=entry.data.get(CONF_MQTT_TLS, False),
+        mqtt_tls_insecure=entry.data.get(CONF_MQTT_TLS_INSECURE, False),
     )
 
     integration = await async_get_integration(hass, DOMAIN)

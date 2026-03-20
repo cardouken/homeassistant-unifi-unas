@@ -20,6 +20,9 @@ MQTT_HOST = "REPLACE_ME"
 MQTT_USER = "REPLACE_ME"
 MQTT_PASS = "REPLACE_ME"
 MQTT_ROOT = "REPLACE_ME"
+MQTT_PORT = "REPLACE_ME"
+MQTT_TLS = "REPLACE_ME"
+MQTT_TLS_INSECURE = "REPLACE_ME"
 DEFAULT_MONITOR_INTERVAL = 30
 MQTT_AVAILABILITY = f"{MQTT_ROOT}/availability"
 MQTT_SYSTEM = f"{MQTT_ROOT}/system"
@@ -100,6 +103,13 @@ class UNASMonitor:
     def __init__(self):
         self.mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         self.mqtt.username_pw_set(MQTT_USER, MQTT_PASS)
+        if MQTT_TLS == "true":
+            import ssl
+            if MQTT_TLS_INSECURE == "true":
+                self.mqtt.tls_set(cert_reqs=ssl.CERT_NONE)
+                self.mqtt.tls_insecure_set(True)
+            else:
+                self.mqtt.tls_set()
         self.mqtt.on_connect = self._on_connect
         self.mqtt.on_disconnect = self._on_disconnect
         self.mqtt.on_message = self._on_message
@@ -109,7 +119,7 @@ class UNASMonitor:
         self.mqtt.will_set(MQTT_AVAILABILITY, "offline", retain=True)
         self.mqtt.loop_start()
         try:
-            self.mqtt.connect(MQTT_HOST, 1883, 60)
+            self.mqtt.connect(MQTT_HOST, int(MQTT_PORT), 60)
         except Exception as e:
             logger.warning(f"Initial MQTT connect failed (will retry): {e}")
 

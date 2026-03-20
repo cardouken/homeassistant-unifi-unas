@@ -29,6 +29,9 @@ class SSHManager:
             mqtt_host: Optional[str] = None,
             mqtt_user: Optional[str] = None,
             mqtt_password: Optional[str] = None,
+            mqtt_port: int = 1883,
+            mqtt_tls: bool = False,
+            mqtt_tls_insecure: bool = False,
     ) -> None:
         self.host = host
         self.username = username
@@ -38,6 +41,9 @@ class SSHManager:
         self.mqtt_host = mqtt_host
         self.mqtt_user = mqtt_user
         self.mqtt_password = mqtt_password
+        self.mqtt_port = mqtt_port
+        self.mqtt_tls = mqtt_tls
+        self.mqtt_tls_insecure = mqtt_tls_insecure
         self._conn: Optional[asyncssh.SSHClientConnection] = None
         self._lock = asyncio.Lock()
 
@@ -149,6 +155,9 @@ class SSHManager:
             "MQTT_USER": self.mqtt_user,
             "MQTT_PASS": self.mqtt_password,
             "MQTT_ROOT": mqtt_root,
+            "MQTT_PORT": str(int(self.mqtt_port)),
+            "MQTT_TLS": "true" if self.mqtt_tls else "false",
+            "MQTT_TLS_INSECURE": "true" if self.mqtt_tls_insecure else "false",
         }
 
         for key, value in replacements.items():
