@@ -1179,7 +1179,21 @@ class UNASBackupSourceSensor(CoordinatorEntity, SensorEntity):
         if not task:
             return None
         source_dirs = task.get("sourceDirs", [])
-        return ", ".join(source_dirs) if source_dirs else None
+        if not source_dirs:
+            return None
+        joined = ", ".join(source_dirs)
+        if len(joined) <= 255:
+            return joined
+        return f"{len(source_dirs)} directories"
+
+    @property
+    def extra_state_attributes(self):
+        task = self.coordinator.find_backup_task(self._task_id)
+        if not task:
+            return None
+        source_dirs = task.get("sourceDirs", [])
+        if source_dirs and len(", ".join(source_dirs)) > 255:
+            return {"source_dirs": source_dirs}
 
 
 class UNASBackupScheduleSensor(CoordinatorEntity, SensorEntity):
