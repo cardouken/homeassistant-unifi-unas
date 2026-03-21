@@ -15,6 +15,7 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
 - [What's Included](#whats-included)
 - [Installation](#installation)
 - [Setup](#setup)
+  - [Secure MQTT (TLS)](#secure-mqtt-tls-optional)
 - [Fan Control Modes](#fan-control-modes)
 - [Troubleshooting](#troubleshooting)
 - [Advanced](#advanced)
@@ -226,6 +227,7 @@ Enter details:
 - **MQTT Host**: IP address of your MQTT broker (e.g., `192.168.1.111`, will be your HA IP if using Mosquitto add-on)
 - **MQTT User**: Your Mosquitto username (required)
 - **MQTT Password**: Your Mosquitto password (required)
+- **Use TLS**: Enable if your MQTT broker uses TLS (see [Secure MQTT (TLS)](#secure-mqtt-tls-optional))
 - **Device Model**: Select your UNAS model from the dropdown
 - **Polling Interval**: How often to poll for metrics (5-60 seconds)
 
@@ -259,6 +261,15 @@ Instead of using a password, you can configure SSH key authentication for more s
 4. Leave the password field empty during integration setup.
 
 The integration will automatically detect and use the SSH key.
+
+### Secure MQTT (TLS) (Optional)
+
+If your MQTT broker is configured for TLS (e.g., port 8883), enable the **Use TLS** toggle during setup. After submitting the main form, you'll be prompted for:
+
+- **MQTT Broker Port** - defaults to 8883
+- **Allow untrusted certificate** - enable if your broker uses a self-signed certificate
+
+This applies to both the config flow connection test and the on-device scripts deployed to your UNAS. The standard plaintext setup (port 1883) requires no changes, just leave **Use TLS** off.
 
 ## Fan Control Modes
 
