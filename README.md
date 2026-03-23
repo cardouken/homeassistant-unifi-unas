@@ -38,7 +38,7 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
 - **UNAS Pro**
 - **UNAS Pro 8**
 - **UNAS Pro 4**
-- **UNAS 4** – Drive bay mappings may be incorrect (likely correct, but require confirmation)
+- **UNAS 4**
 - **UNAS 2**
 - **UNVR** – Unofficial support (see note below)
 - **UNVR Pro** – Unofficial support (see note below)
@@ -49,39 +49,6 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
 > Protect version instead of UniFi Drive version and will prefix entities with `unvr_` instead of `unas_`.
 >
 > During setup, just use your UNVR/UNVR Pro IP and credentials.
-
-<details>
-<summary><strong>Help confirm device support!</strong></summary>
-
-If you own a UNAS 4 or a new UNAS/UNVR device that has not yet been listed above, 
-you can help confirm drive bay mappings by running this command on your UNAS/UNVR via SSH:
-
-```bash
-for dev in /dev/sd?; do
-    ata_port=$(udevadm info -q path -n "$dev" | grep -oP 'ata\K[0-9]+')
-    serial=$(smartctl -i "$dev" 2>/dev/null | grep 'Serial Number' | awk '{print $NF}')
-    model=$(smartctl -i "$dev" 2>/dev/null | grep 'Device Model' | awk '{$1=$2=""; print $0}' | xargs)
-    echo "Device: $dev | ATA Port: $ata_port | Serial: $serial | Model: $model"
-done
-```
-
-**Example output:**
-
-```
-Device: /dev/sda | ATA Port: 1 | Serial: ZR5FFXXX | Model: ST18000NM001J-2TV113
-Device: /dev/sdb | ATA Port: 4 | Serial: ZR51DXXX | Model: ST18000NM000J-2TV103
-Device: /dev/sdc | ATA Port: 5 | Serial: ZR5FHXXX | Model: ST18000NM001J-2TV113
-```
-
-Then check the UniFi Drive UI and match the serial numbers to physical bay numbers. For example:
-
-- `/dev/sda` - ATA Port 1 - Bay 6
-- `/dev/sdb` - ATA Port 4 - Bay 3
-- `/dev/sdc` - ATA Port 5 - Bay 5
-
-Please [open a GitHub issue](https://github.com/cardouken/homeassistant-unifi-unas/issues) with your results to help improve device support!
-
-</details>
 
 ## What's Included
 
