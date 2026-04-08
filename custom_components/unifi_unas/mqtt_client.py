@@ -4,7 +4,7 @@ import asyncio
 import logging
 import json
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant, callback
@@ -46,6 +46,7 @@ Examples:
 
 
 REFRESH_DEBOUNCE_SECONDS = 0.5
+MACHINE_ID_WINDOW_SECONDS = 120
 
 
 class UNASMQTTClient:
@@ -60,6 +61,7 @@ class UNASMQTTClient:
         self._last_update: datetime | None = None
         self._pending_refresh: asyncio.TimerHandle | None = None
         self._coordinator = None
+        self._recent_machine_ids: dict[str, datetime] = {}
 
     async def async_subscribe(self) -> None:
         if mqtt.DOMAIN not in self.hass.data:
@@ -132,6 +134,8 @@ class UNASMQTTClient:
         # unas/system/<metric>
         if category == "system":
             self._store_value(f"unas_{item}", payload)
+            if item == "machine_id" and payload:
+                self._recent_machine_ids[payload] = datetime.now()
         
         # unas/smb/connections or unas/smb/clients
         elif category == "smb":
@@ -223,6 +227,13 @@ class UNASMQTTClient:
     def get_data(self) -> dict[str, Any]:
         self._cleanup_stale_data()
         return self._data.copy()
+
+    def get_recent_machine_ids(self) -> set[str]:
+        cutoff = datetime.now() - timedelta(seconds=MACHINE_ID_WINDOW_SECONDS)
+        self._recent_machine_ids = {
+            mid: ts for mid, ts in self._recent_machine_ids.items() if ts > cutoff
+        }
+        return set(self._recent_machine_ids.keys())
 
     def _cleanup_stale_data(self) -> None:
         now = datetime.now()

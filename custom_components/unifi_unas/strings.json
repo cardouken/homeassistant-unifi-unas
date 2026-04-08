@@ -97,6 +97,10 @@
     "mqtt_missing": {
       "title": "MQTT Integration Required",
       "description": "The MQTT integration has been removed but is required for UniFi UNAS to function. Please re-add the MQTT integration or remove the UniFi UNAS integration."
+    },
+    "duplicate_publishers": {
+      "title": "Multiple devices publishing to the same MQTT topic",
+      "description": "More than one device is publishing UniFi UNAS data to the same MQTT topic prefix. This usually means the integration's SSH host was reconfigured at some point and the previous device is still running orphaned scripts, which will corrupt sensor values by mixing data from both devices.\n\nMachine IDs seen: {machine_ids}\n\nTo identify which device is the orphan, compare the machine IDs above against `/etc/machine-id` on your UNAS. Then SSH into the other device(s) and run:\n\n```\nsystemctl stop unas_monitor fan_control\nsystemctl disable unas_monitor fan_control\nrm -f /etc/systemd/system/unas_monitor.service /etc/systemd/system/fan_control.service\nrm -f /root/unas_monitor.py /root/fan_control.sh\nsystemctl daemon-reload\n```\n\nThis warning will clear automatically once only one device is publishing."
     }
   }
 }

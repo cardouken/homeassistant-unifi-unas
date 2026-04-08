@@ -333,6 +333,27 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
             )
             raise UpdateFailed("MQTT integration is required but not found")
 
+        recent_machine_ids = self.mqtt_client.get_recent_machine_ids()
+        duplicate_issue_id = f"duplicate_publishers_{self.entry.entry_id}"
+        if len(recent_machine_ids) > 1:
+            _LOGGER.warning(
+                "Multiple devices publishing to the same MQTT topic: %s",
+                ", ".join(sorted(recent_machine_ids)),
+            )
+            ir.async_create_issue(
+                self.hass,
+                DOMAIN,
+                duplicate_issue_id,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="duplicate_publishers",
+                translation_placeholders={
+                    "machine_ids": ", ".join(sorted(recent_machine_ids)),
+                },
+            )
+        else:
+            ir.async_delete_issue(self.hass, DOMAIN, duplicate_issue_id)
+
         data = {
             "scripts_installed": False,
             "ssh_connected": False,

@@ -143,6 +143,12 @@ class UNASMonitor:
         self.prev_disk_write = None
         self.prev_time = None
 
+        try:
+            with open('/etc/machine-id') as f:
+                self.machine_id = f.read().strip()
+        except OSError:
+            self.machine_id = ""
+
     def _on_connect(self, _client, _userdata, _flags, reason_code, _properties):
         if reason_code == 0:
             logger.info("MQTT connected")
@@ -341,6 +347,8 @@ class UNASMonitor:
 
     def get_system_metrics(self):
         data = {}
+
+        data['machine_id'] = self.machine_id
 
         with open('/proc/uptime') as f:
             data['uptime'] = int(float(f.read().split()[0]))
