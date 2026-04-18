@@ -4,8 +4,16 @@ import asyncio
 import json
 import logging
 import shlex
+import sys
+import types
 from pathlib import Path
 from typing import Optional
+
+# Temporary fix: asyncssh imports fido2.client.windows which crashes on non-Windows Python 3.14+
+# Pre-loading a dummy module converts the error to ImportError which asyncssh handles correctly
+# https://github.com/cardouken/homeassistant-unifi-unas/issues/26
+if sys.platform != "win32" and "fido2.client.windows" not in sys.modules:
+    sys.modules["fido2.client.windows"] = types.ModuleType("fido2.client.windows")
 
 import aiofiles
 import asyncssh
