@@ -6,6 +6,7 @@ import logging
 import json
 import fcntl
 import http.client
+import re
 from pathlib import Path
 import paho.mqtt.client as mqtt  # type: ignore  # installed on UNAS, not HA
 
@@ -353,7 +354,9 @@ class UNASMonitor:
         with open('/proc/uptime') as f:
             data['uptime'] = int(float(f.read().split()[0]))
 
-        data['os_version'] = self.run_cmd(['dpkg-query', '-W', '-f=${Version}', 'unifi-core']).strip()
+        version_str = open('/usr/lib/version').read().strip()
+        match = re.search(r'\.v(\d+\.\d+\.\d+)\.', version_str)
+        data['os_version'] = match.group(1) if match else version_str
         if DEVICE_MODEL.startswith("UNVR"):
             data['protect_version'] = self.run_cmd(['dpkg-query', '-W', '-f=${Version}', 'unifi-protect']).strip()
         else:
