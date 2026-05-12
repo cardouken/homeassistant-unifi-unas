@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 
 from packaging.version import Version, InvalidVersion
@@ -48,6 +49,7 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
 ]
 
+SSH_UNAVAILABLE_THRESHOLD = 600
 LAST_CLEANUP_VERSION_KEY = "last_cleanup_version"
 LAST_DEPLOY_VERSION_KEY = "last_deploy_version"
 PERFORM_MQTT_CLEANUP = True
@@ -302,6 +304,7 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
         self.mqtt_client = mqtt_client
         self.entry = entry
         self.pending_script_deploy = pending_script_deploy
+        self.ssh_failed_since: float | None = None
         self.discovered_bays: set[str] = set()
         self.discovered_nvmes: set[str] = set()
         self.discovered_pools: set[str] = set()
@@ -388,6 +391,12 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
                 "fan_control_running": fan_control_running,
             })
 
+            if self.ssh_failed_since is not None:
+                _LOGGER.info("SSH connection restored to %s", self.entry.data[CONF_HOST])
+                self.ssh_failed_since = None
+            ssh_issue_id = f"ssh_unavailable_{self.entry.entry_id}"
+            ir.async_delete_issue(self.hass, DOMAIN, ssh_issue_id)
+
             try:
                 result = await self.ssh_manager.execute_backup_api("GET", "/api/v1/remote-backup/tasks")
                 if result.get("data"):
@@ -400,6 +409,22 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
 
         except Exception as err:
             _LOGGER.warning("SSH connection temporarily unavailable: %s", err)
+            now = time.time()
+            if self.ssh_failed_since is None:
+                self.ssh_failed_since = now
+            elif now - self.ssh_failed_since > SSH_UNAVAILABLE_THRESHOLD:
+                ssh_issue_id = f"ssh_unavailable_{self.entry.entry_id}"
+                ir.async_create_issue(
+                    self.hass,
+                    DOMAIN,
+                    ssh_issue_id,
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.WARNING,
+                    translation_key="ssh_unavailable",
+                    translation_placeholders={
+                        "host": self.entry.data[CONF_HOST],
+                    },
+                )
 
         try:
             if self.sensor_add_entities is not None:

@@ -101,6 +101,10 @@
     "duplicate_publishers": {
       "title": "Multiple devices publishing to the same MQTT topic",
       "description": "More than one device is publishing UniFi UNAS data to the same MQTT topic prefix. This usually means the integration's SSH host was reconfigured at some point and the previous device is still running orphaned scripts, which will corrupt sensor values by mixing data from both devices.\n\nMachine IDs seen: {machine_ids}\n\nTo identify which device is the orphan, compare the machine IDs above against `/etc/machine-id` on your UNAS. Then SSH into the other device(s) and run:\n\n```\nsystemctl stop unas_monitor fan_control\nsystemctl disable unas_monitor fan_control\nrm -f /etc/systemd/system/unas_monitor.service /etc/systemd/system/fan_control.service\nrm -f /root/unas_monitor.py /root/fan_control.sh\nsystemctl daemon-reload\n```\n\nThis warning will clear automatically once only one device is publishing."
+    },
+    "ssh_unavailable": {
+      "title": "UNAS SSH connection unavailable",
+      "description": "Home Assistant has been unable to connect to your UniFi UNAS at `{host}` via SSH for over 10 minutes. Without SSH, the integration cannot check or redeploy monitoring scripts.\n\nThis can happen after a firmware upgrade if the SSH password was reset. Verify that you can SSH into the UNAS manually, then reload the integration.\n\nIf the password changed, update it via the integration's reconfigure option."
     }
   }
 }
