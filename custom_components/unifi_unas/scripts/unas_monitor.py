@@ -244,8 +244,8 @@ class UNASMonitor:
         for pool in data['pools']:
             capacity = pool.get('capacity', 0)
             usage = pool.get('usage', 0)
-            capacity_gb = round(capacity / (1024 ** 3))
-            usage_gb = round(usage / (1024 ** 3))
+            capacity_gb = round(capacity / (1000 ** 3))
+            usage_gb = round(usage / (1000 ** 3))
             available_gb = capacity_gb - usage_gb
             usage_pct = round((usage / capacity) * 100) if capacity else 0
             raid_groups = pool.get('raidGroups', [])
@@ -318,7 +318,7 @@ class UNASMonitor:
             members = self._get_share_members(drive['id'], member_count, user_map, console_owner)
             shares.append({
                 'name': drive.get('name', 'unknown'),
-                'usage': round(usage_bytes / (1024 ** 3), 2),
+                'usage': round(usage_bytes / (1000 ** 3), 2),
                 'quota': quota_raw,
                 'pool': str(pool_num),
                 'member_count': drive.get('memberCount', 0),
@@ -576,7 +576,7 @@ class UNASMonitor:
                 drive['power_on_hours'] = data.get('power_on_time', {}).get('hours', 0)
 
             size_bytes = data.get('user_capacity', {}).get('bytes', 0)
-            drive['total_size'] = round(size_bytes / (1024 ** 4), 2)
+            drive['total_size'] = round(size_bytes / (1000 ** 4), 2)
 
             drives.append(drive)
             current_drive_map[serial] = bay
@@ -649,7 +649,7 @@ class UNASMonitor:
             }
 
             size_bytes = data.get('user_capacity', {}).get('bytes', 0)
-            nvme['total_size'] = round(size_bytes / (1024 ** 4), 2)
+            nvme['total_size'] = round(size_bytes / (1000 ** 4), 2)
 
             if health.get('critical_warning', 0) != 0 or health.get('available_spare', 100) < 10:
                 nvme['status'] = "Warning"
@@ -666,14 +666,14 @@ class UNASMonitor:
             if not volume_dir.is_dir():
                 continue
 
-            df_output = self.run_cmd(['df', '-BG', str(volume_dir)])
+            df_output = self.run_cmd(['df', '-B1', str(volume_dir)])
             lines = df_output.strip().split('\n')
 
             if len(lines) < 2:
                 continue
 
             parts = lines[1].split()
-            size_gb = int(parts[1].rstrip('G'))
+            size_gb = round(int(parts[1]) / (1000 ** 3))
 
             if size_gb <= 75:
                 continue
@@ -681,8 +681,8 @@ class UNASMonitor:
             pools.append({
                 'pool': pool_num,
                 'size': size_gb,
-                'used': int(parts[2].rstrip('G')),
-                'available': int(parts[3].rstrip('G')),
+                'used': round(int(parts[2]) / (1000 ** 3)),
+                'available': round(int(parts[3]) / (1000 ** 3)),
                 'usage': int(parts[4].rstrip('%'))
             })
             pool_num += 1
