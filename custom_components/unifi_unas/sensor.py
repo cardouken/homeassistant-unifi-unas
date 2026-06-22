@@ -82,7 +82,7 @@ UNAS_SENSORS = [
     (
         "unas_memory_used",
         "Memory Used",
-        UnitOfInformation.MEGABYTES,
+        UnitOfInformation.MEBIBYTES,
         SensorDeviceClass.DATA_SIZE,
         SensorStateClass.MEASUREMENT,
         None,
@@ -90,7 +90,7 @@ UNAS_SENSORS = [
     (
         "unas_memory_total",
         "Memory Total",
-        UnitOfInformation.MEGABYTES,
+        UnitOfInformation.MEBIBYTES,
         SensorDeviceClass.DATA_SIZE,
         None,
         None,
@@ -521,8 +521,8 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
             if unit == "GB":
                 self._attr_suggested_unit_of_measurement = UnitOfInformation.TERABYTES
             # RAM
-            elif unit == "MB":
-                self._attr_suggested_unit_of_measurement = UnitOfInformation.GIGABYTES
+            elif unit == "MiB":
+                self._attr_suggested_unit_of_measurement = UnitOfInformation.GIBIBYTES
 
         device_name, device_model = get_device_info(coordinator.entry.data)
         self._attr_device_info = DeviceInfo(
