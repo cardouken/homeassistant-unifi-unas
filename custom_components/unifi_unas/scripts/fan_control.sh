@@ -143,9 +143,18 @@ float_compare() {
     }'
 }
 
+# writable PWM channels, detected at startup. UNAS Pro/Pro 8 expose pwm1+pwm2
+# (adt7475), single-fan models like UNAS 2 (ctf2302) only expose pwm1
+PWM_CHANNELS=()
+for _pwm in /sys/class/hwmon/hwmon0/pwm[1-9]; do
+    [ -w "$_pwm" ] && PWM_CHANNELS+=("$_pwm")
+done
+
 set_pwm() {
-    echo "$1" > /sys/class/hwmon/hwmon0/pwm1
-    echo "$1" > /sys/class/hwmon/hwmon0/pwm2
+    local ch
+    for ch in "${PWM_CHANNELS[@]:-}"; do
+        [ -n "$ch" ] && echo "$1" > "$ch"
+    done
 }
 
 # =============================================================================
