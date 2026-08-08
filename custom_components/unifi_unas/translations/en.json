@@ -14,11 +14,23 @@
           "mqtt_tls": "Use TLS",
           "device_model": "Device Model",
           "device_name": "Device Name",
+          "credentials_file": "MQTT credentials file (optional)",
+          "verify_host_key": "Verify SSH host key",
+          "known_hosts": "SSH known_hosts file (optional)",
+          "enable_monitor": "Enable monitoring service",
+          "enable_fan_control": "Enable fan-control service",
+          "min_pwm_floor": "Minimum fan PWM floor (0-255, 0 = disabled)",
           "scan_interval": "Polling Interval (seconds, 5-60)"
         },
         "data_description": {
           "mqtt_tls": "Only enable if your MQTT broker is configured for TLS (port 8883). Leave off for standard setups.",
-          "device_name": "Optional custom name (e.g. UNAS Pro Hallway) - will be used for entity ID-s, e.g.: sensor.unas_pro_hallway_cpu_temperature"
+          "device_name": "Optional custom name (e.g. UNAS Pro Hallway) - will be used for entity ID-s, e.g.: sensor.unas_pro_hallway_cpu_temperature",
+          "credentials_file": "Optional path on the Home Assistant host to a root-readable env file defining MQTT_USER and MQTT_PASS (and optionally other MQTT_* settings). When set, the MQTT credentials are delivered to the NAS via a root-only systemd EnvironmentFile instead of being written into the on-device scripts. Leave blank for the standard setup.",
+          "verify_host_key": "Verify the NAS SSH host key. On the first connection the key is recorded (trust-on-first-use) and checked on every connection after that. Leave off to keep the current permissive behavior.",
+          "known_hosts": "Optional path on the Home Assistant host to a known_hosts file to verify the NAS host key against. Takes precedence over trust-on-first-use pinning when set.",
+          "enable_monitor": "Deploy and run the monitoring service that publishes sensor data. On by default.",
+          "enable_fan_control": "Deploy and run the fan-control service. Turn off for a monitoring-only install that leaves the fans fully UNAS-managed; the fan-control script is not deployed to the NAS.",
+          "min_pwm_floor": "Optional safety floor enforced in every actively-controlled fan mode, so a misconfigured curve or set speed can't drive the fans below this PWM value. 0 disables the floor (default)."
         }
       },
       "mqtt_tls": {
@@ -45,12 +57,24 @@
           "mqtt_tls": "Use TLS",
           "device_model": "Device Model",
           "device_name": "Device Name",
+          "credentials_file": "MQTT credentials file (optional)",
+          "verify_host_key": "Verify SSH host key",
+          "known_hosts": "SSH known_hosts file (optional)",
+          "enable_monitor": "Enable monitoring service",
+          "enable_fan_control": "Enable fan-control service",
+          "min_pwm_floor": "Minimum fan PWM floor (0-255, 0 = disabled)",
           "scan_interval": "Polling Interval (seconds, 5-60)"
         },
         "data_description": {
           "mqtt_tls": "Only enable if your MQTT broker is configured for TLS (port 8883). Leave off for standard setups.",
           "device_model": "WARNING: Changing the device model requires deleting and re-adding the integration to update drive entities.",
-          "device_name": "Changes device display names only. Entity IDs are set at initial setup and cannot be changed here."
+          "device_name": "Changes device display names only. Entity IDs are set at initial setup and cannot be changed here.",
+          "credentials_file": "Optional path on the Home Assistant host to a root-readable env file defining MQTT_USER and MQTT_PASS (and optionally other MQTT_* settings). When set, the MQTT credentials are delivered to the NAS via a root-only systemd EnvironmentFile instead of being written into the on-device scripts. Leave blank for the standard setup.",
+          "verify_host_key": "Verify the NAS SSH host key. On the first connection the key is recorded (trust-on-first-use) and checked on every connection after that. Leave off to keep the current permissive behavior.",
+          "known_hosts": "Optional path on the Home Assistant host to a known_hosts file to verify the NAS host key against. Takes precedence over trust-on-first-use pinning when set.",
+          "enable_monitor": "Deploy and run the monitoring service that publishes sensor data. On by default.",
+          "enable_fan_control": "Deploy and run the fan-control service. Turn off for a monitoring-only install that leaves the fans fully UNAS-managed; the fan-control script is not deployed to the NAS.",
+          "min_pwm_floor": "Optional safety floor enforced in every actively-controlled fan mode, so a misconfigured curve or set speed can't drive the fans below this PWM value. 0 disables the floor (default)."
         }
       },
       "reconfigure_mqtt_tls": {

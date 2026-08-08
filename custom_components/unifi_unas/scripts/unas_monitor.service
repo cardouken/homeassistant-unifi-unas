@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
+EnvironmentFile=-/root/.unas_monitor.env
 ExecStart=/usr/bin/python3 /root/unas_monitor.py
 Restart=always
 RestartSec=30

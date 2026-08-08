@@ -20,7 +20,39 @@ CONF_MQTT_PASSWORD = "mqtt_password"
 CONF_MQTT_PORT = "mqtt_port"
 CONF_MQTT_TLS = "mqtt_tls"
 CONF_MQTT_TLS_INSECURE = "mqtt_tls_insecure"
+CONF_CREDENTIALS_FILE = "credentials_file"
+CONF_MIN_PWM_FLOOR = "min_pwm_floor"
+CONF_VERIFY_HOST_KEY = "verify_host_key"
+CONF_KNOWN_HOSTS = "known_hosts"
+CONF_HOST_KEY = "host_key"
+CONF_ENABLE_MONITOR = "enable_monitor"
+CONF_ENABLE_FAN_CONTROL = "enable_fan_control"
 CONF_SCAN_INTERVAL = "scan_interval"
+
+DEFAULT_MIN_PWM_FLOOR = 0
+MAX_PWM = 255
+
+# On-device root-only env file that supplies MQTT settings to the monitor and
+# fan-control services via systemd EnvironmentFile=. Used by the optional
+# credentials_file delivery path so secrets need not be inlined into the
+# deployed scripts.
+UNAS_ENV_FILE = "/root/.unas_monitor.env"
+
+# MQTT settings the on-device env file may supply (env var name on the NAS).
+# The scripts read these from the environment, falling back to any value baked
+# in at deploy time when the variable is unset.
+ENV_MQTT_KEYS = (
+    "MQTT_HOST",
+    "MQTT_USER",
+    "MQTT_PASS",
+    "MQTT_ROOT",
+    "MQTT_PORT",
+    "MQTT_TLS",
+    "MQTT_TLS_INSECURE",
+)
+# The subset that is sensitive and must not be inlined into script bodies when
+# the env-file delivery path is active.
+ENV_MQTT_SECRET_KEYS = ("MQTT_USER", "MQTT_PASS")
 
 DEFAULT_MQTT_PORT = 1883
 DEFAULT_MQTT_TLS_PORT = 8883

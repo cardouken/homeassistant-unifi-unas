@@ -229,6 +229,14 @@ Instead of using a password, you can configure SSH key authentication for more s
 
 The integration will automatically detect and use the SSH key.
 
+### SSH Host Key Verification (Optional)
+
+By default the SSH connection to the NAS does not verify the host key. If you'd like the integration to verify it, enable **Verify SSH host key** during setup (or reconfigure). On the first successful connection the NAS host key is recorded (trust-on-first-use) and stored with the config entry; every connection afterwards is checked against it, so a man-in-the-middle that presents a different key is rejected.
+
+Alternatively, you can point **SSH known_hosts file** at a `known_hosts` file on the Home Assistant host (for example one you manage yourself); when set, it is used to verify the host key and takes precedence over trust-on-first-use.
+
+If the NAS host key legitimately changes (for example after a firmware reinstall), remove and re-add the integration - or clear the stored key - so a new key can be pinned. Both options are off/blank by default, preserving the current behavior.
+
 ### Secure MQTT (TLS) (Optional)
 
 If your MQTT broker is configured for TLS (e.g., port 8883), enable the **Use TLS** toggle during setup. After submitting the main form, you'll be prompted for:
@@ -237,6 +245,26 @@ If your MQTT broker is configured for TLS (e.g., port 8883), enable the **Use TL
 - **Allow untrusted certificate** - enable if your broker uses a self-signed certificate
 
 This applies to both the config flow connection test and the on-device scripts deployed to your UNAS. The standard plaintext setup (port 1883) requires no changes, just leave **Use TLS** off.
+
+### Externalizing MQTT Credentials (Optional)
+
+By default, the MQTT credentials are written directly into the monitoring scripts that are deployed to the NAS (`/root/unas_monitor.py`, `/root/fan_control.sh`). If you'd rather keep the MQTT password out of those on-device script bodies - for example because you manage secrets with a password manager or an env file - you can supply a **credentials file** instead.
+
+**How it works:**
+
+1. Create a root-readable env file on the Home Assistant host (for example under `/share`), defining at least the MQTT username and password:
+   ```bash
+   # /share/unifi_unas/mqtt.env
+   MQTT_USER=your_mqtt_user
+   MQTT_PASS=your_mqtt_password
+   ```
+   You may also override any other setting the scripts read: `MQTT_HOST`, `MQTT_PORT`, `MQTT_TLS`, `MQTT_TLS_INSECURE`, `MQTT_ROOT`.
+
+2. Enter that path in the **MQTT credentials file** field during setup (or reconfigure).
+
+When set, the integration uploads that file to a root-only (`chmod 600`) file on the NAS (`/root/.unas_monitor.env`) and the systemd services load it via `EnvironmentFile=`. The scripts read the MQTT settings from the environment, so the username and password are no longer inlined into the deployed script bodies. Any value not provided by the env file falls back to what you entered in the integration.
+
+Leave the field blank for the standard setup (credentials are written into the scripts as before).
 
 ## Fan Control Modes
 
@@ -315,6 +343,16 @@ change, depending on your environment and targets.
 
 Lock fans to a fixed speed (0-100%). Use the Fan Speed slider to set the desired speed.
 
+### Fan Safety / Failsafe
+
+Whenever the fan-control daemon isn't actively driving the fans, control is handed back to the NAS firmware so the drives are never left under a stale fan speed:
+
+- When the daemon stops, crashes, or is disabled, a systemd `ExecStopPost` hook (and the script's own exit handler) restores every fan channel to automatic mode (`pwmN_enable=2`).
+- The daemon explicitly takes manual control (`pwmN_enable=1`) when it writes a PWM value, and hands control back to automatic when you switch to **UNAS Managed** mode.
+- A systemd watchdog (`WatchdogSec`) restarts the daemon if it hangs, rather than leaving a frozen PWM in place.
+
+**Minimum fan PWM floor (optional):** you can set a **Minimum fan PWM floor** (0-255, `0` disables it) in the integration options. When set, it is enforced in every actively-controlled mode (Custom Curve, Target Temperature, Set Speed), so a misconfigured curve or a low set speed can't drive the fans below a safe ratio. It does not apply to **UNAS Managed** mode, where the firmware controls the fans.
+
 ## Troubleshooting
 
 ### Scripts Not Installing
@@ -370,6 +408,26 @@ Removing the integration fully restores your UNAS to stock. The cleanup process:
 No manual cleanup is required.
 
 ## Advanced
+
+<details>
+<summary><strong>Headless collector (--once --json)</strong></summary>
+
+The monitor script can run a single collection cycle and print the full metric set as JSON, without connecting to MQTT. This is handy for troubleshooting, testing, and external consumers that want the same data over SSH:
+
+```bash
+ssh root@YOUR_UNAS_IP "python3 /root/unas_monitor.py --once --json"
+```
+
+It prints a JSON object with `system`, `hdd`, `nvme`, `pools`, and (on non-UNVR devices) `smb`, `nfs`, and `shares`, then exits. No MQTT connection is made and the fan-control shared temp file is not touched.
+
+</details>
+
+<details>
+<summary><strong>Monitoring-only / independent services</strong></summary>
+
+The two on-device services can be deployed independently via the **Enable monitoring service** and **Enable fan-control service** options (both on by default). Turning **Enable fan-control service** off gives you a monitoring-only install: the fan-control script is not deployed to the NAS and the fans stay fully UNAS-managed. Toggling a service off later stops, disables, and removes it on the next reload (and hands the fans back to firmware control when fan-control is disabled).
+
+</details>
 
 <details>
 <summary><strong>MQTT Topics</strong></summary>

@@ -4,7 +4,12 @@ After=network-online.target unas_monitor.service
 Wants=network-online.target
 
 [Service]
+EnvironmentFile=-/root/.unas_monitor.env
+Type=notify
+NotifyAccess=all
+WatchdogSec=120
 ExecStart=/root/fan_control.sh --service
+ExecStopPost=/bin/sh -c 'for e in /sys/class/hwmon/hwmon0/pwm*_enable; do [ -w "$e" ] && echo 2 > "$e"; done'
 Restart=always
 RestartSec=30
 User=root

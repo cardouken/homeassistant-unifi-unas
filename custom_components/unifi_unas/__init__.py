@@ -27,10 +27,18 @@ from .const import (
     CONF_MQTT_PORT,
     CONF_MQTT_TLS,
     CONF_MQTT_TLS_INSECURE,
+    CONF_CREDENTIALS_FILE,
+    CONF_MIN_PWM_FLOOR,
+    CONF_VERIFY_HOST_KEY,
+    CONF_KNOWN_HOSTS,
+    CONF_HOST_KEY,
+    CONF_ENABLE_MONITOR,
+    CONF_ENABLE_FAN_CONTROL,
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_DEVICE_MODEL,
+    DEFAULT_MIN_PWM_FLOOR,
     DEFAULT_MQTT_PORT,
     get_mqtt_root,
     get_mqtt_topics,
@@ -166,6 +174,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mqtt_port=entry.data.get(CONF_MQTT_PORT, DEFAULT_MQTT_PORT),
         mqtt_tls=entry.data.get(CONF_MQTT_TLS, False),
         mqtt_tls_insecure=entry.data.get(CONF_MQTT_TLS_INSECURE, False),
+        credentials_file=entry.data.get(CONF_CREDENTIALS_FILE),
+        min_pwm_floor=entry.data.get(CONF_MIN_PWM_FLOOR, DEFAULT_MIN_PWM_FLOOR),
+        verify_host_key=entry.data.get(CONF_VERIFY_HOST_KEY, False),
+        known_hosts_path=entry.data.get(CONF_KNOWN_HOSTS),
+        pinned_host_key=entry.data.get(CONF_HOST_KEY),
+        enable_monitor=entry.data.get(CONF_ENABLE_MONITOR, True),
+        enable_fan_control=entry.data.get(CONF_ENABLE_FAN_CONTROL, True),
     )
 
     integration = await async_get_integration(hass, DOMAIN)
@@ -180,6 +195,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await manager.connect()
         ssh_connected = True
         _LOGGER.info("SSH connection established to %s", entry.data[CONF_HOST])
+
+        # Trust-on-first-use: when host-key verification is enabled and no key
+        # has been pinned yet, record the key seen on this first connection so
+        # subsequent connections are verified against it.
+        if (
+            entry.data.get(CONF_VERIFY_HOST_KEY)
+            and not entry.data.get(CONF_HOST_KEY)
+            and manager.server_host_key
+        ):
+            new_data = dict(entry.data)
+            new_data[CONF_HOST_KEY] = manager.server_host_key
+            hass.config_entries.async_update_entry(entry, data=new_data)
+            manager.pinned_host_key = manager.server_host_key
+            _LOGGER.info("Pinned SSH host key for %s", entry.data[CONF_HOST])
 
         scripts_installed = await manager.scripts_installed()
         if last_deploy_version != current_version or not scripts_installed or is_dev_version:

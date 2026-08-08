@@ -23,6 +23,16 @@ SYMMETRIC_DECAY=true
 # Configuration (replaced at deploy time)
 # =============================================================================
 
+# Capture any MQTT settings provided via the environment (e.g. a systemd
+# EnvironmentFile) before the deploy-time defaults below overwrite them.
+_ENV_MQTT_HOST="${MQTT_HOST:-}"
+_ENV_MQTT_USER="${MQTT_USER:-}"
+_ENV_MQTT_PASS="${MQTT_PASS:-}"
+_ENV_MQTT_ROOT="${MQTT_ROOT:-}"
+_ENV_MQTT_PORT="${MQTT_PORT:-}"
+_ENV_MQTT_TLS="${MQTT_TLS:-}"
+_ENV_MQTT_TLS_INSECURE="${MQTT_TLS_INSECURE:-}"
+
 MQTT_HOST="REPLACE_ME"
 MQTT_USER="REPLACE_ME"
 MQTT_PASS="REPLACE_ME"
@@ -30,6 +40,19 @@ MQTT_ROOT="REPLACE_ME"
 MQTT_PORT="REPLACE_ME"
 MQTT_TLS="REPLACE_ME"
 MQTT_TLS_INSECURE="REPLACE_ME"
+
+# Environment values take precedence over the deploy-time defaults above. This
+# lets the integration supply MQTT settings via a root-only EnvironmentFile
+# (see credentials_file) instead of inlining secrets into this script. When a
+# variable is unset the deploy-time value is kept, so default behavior is
+# unchanged.
+MQTT_HOST="${_ENV_MQTT_HOST:-$MQTT_HOST}"
+MQTT_USER="${_ENV_MQTT_USER:-$MQTT_USER}"
+MQTT_PASS="${_ENV_MQTT_PASS:-$MQTT_PASS}"
+MQTT_ROOT="${_ENV_MQTT_ROOT:-$MQTT_ROOT}"
+MQTT_PORT="${_ENV_MQTT_PORT:-$MQTT_PORT}"
+MQTT_TLS="${_ENV_MQTT_TLS:-$MQTT_TLS}"
+MQTT_TLS_INSECURE="${_ENV_MQTT_TLS_INSECURE:-$MQTT_TLS_INSECURE}"
 
 MQTT_TLS_OPTS=""
 if [ "$MQTT_TLS" = "true" ]; then
@@ -42,6 +65,11 @@ fi
 MQTT_SYSTEM="${MQTT_ROOT}/system"
 MQTT_CONTROL="${MQTT_ROOT}/control"
 MQTT_FAN="${MQTT_CONTROL}/fan"
+
+# Optional global minimum PWM floor (0 = disabled), enforced in every actively
+# controlled mode so a misconfiguration can't drive the fans below a safe
+# ratio. Set at deploy time from the integration config.
+MIN_PWM_FLOOR="0"
 
 STATE_FILE="/tmp/fan_control_state"
 LAST_PWM_FILE="/tmp/fan_control_last_pwm"
@@ -108,6 +136,15 @@ log() {
     echo "$msg" >> "$LOG_FILE"
 }
 
+# Notify systemd of readiness/liveness when run under a Type=notify unit with
+# WatchdogSec. No-ops when not managed by systemd (NOTIFY_SOCKET unset) or when
+# the systemd-notify helper is unavailable, so manual runs are unaffected.
+notify_systemd() {
+    [ -n "${NOTIFY_SOCKET:-}" ] || return 0
+    command -v systemd-notify >/dev/null 2>&1 || return 0
+    systemd-notify "$@" 2>/dev/null || true
+}
+
 # =============================================================================
 # Utility functions
 # =============================================================================
@@ -150,10 +187,32 @@ for _pwm in /sys/class/hwmon/hwmon0/pwm[1-9]; do
     [ -w "$_pwm" ] && PWM_CHANNELS+=("$_pwm")
 done
 
+# Matching pwmN_enable channels (1 = manual control, 2 = automatic/chip-managed).
+PWM_ENABLE_CHANNELS=()
+for _pwm in "${PWM_CHANNELS[@]:-}"; do
+    [ -n "$_pwm" ] && PWM_ENABLE_CHANNELS+=("${_pwm}_enable")
+done
+
+# Write an enable mode to every writable pwmN_enable channel.
+set_pwm_enable() {
+    local ch
+    for ch in "${PWM_ENABLE_CHANNELS[@]:-}"; do
+        [ -n "$ch" ] && [ -w "$ch" ] && echo "$1" > "$ch" 2>/dev/null || true
+    done
+}
+
 set_pwm() {
+    local value="$1"
+    # Enforce the optional global minimum PWM floor regardless of curve/mode.
+    if is_integer "${MIN_PWM_FLOOR:-0}" && [ "${MIN_PWM_FLOOR:-0}" -gt 0 ] \
+       && is_integer "$value" && [ "$value" -lt "$MIN_PWM_FLOOR" ]; then
+        value="$MIN_PWM_FLOOR"
+    fi
+    # Take manual control so the writes below are honored by the controller.
+    set_pwm_enable 1
     local ch
     for ch in "${PWM_CHANNELS[@]:-}"; do
-        [ -n "$ch" ] && echo "$1" > "$ch"
+        [ -n "$ch" ] && echo "$value" > "$ch"
     done
 }
 
@@ -224,6 +283,9 @@ publish_if_changed() {
 
 cleanup() {
     kill "$MQTT_PID" 2>/dev/null || true
+    # Hand the fans back to automatic/firmware control so a stale manual PWM is
+    # never left frozen on the fans if this daemon exits.
+    set_pwm_enable 2
 }
 
 # =============================================================================
@@ -500,6 +562,13 @@ handle_mode_transition() {
         SAVED_PI_INTEGRAL=""
     fi
 
+    # Leaving an actively-controlled mode for unas_managed: hand the fans back
+    # to automatic/firmware control so the last manual PWM isn't left frozen.
+    if [ "$FAN_MODE" = "unas_managed" ] && [ "$PREV_FAN_MODE" != "unas_managed" ]; then
+        set_pwm_enable 2
+        log "MODE SWITCH: Restored automatic fan control (pwm*_enable=2)"
+    fi
+
     PREV_FAN_MODE="$FAN_MODE"
 }
 
@@ -663,6 +732,10 @@ SERVICE=false
 rotate_log_if_needed
 log "Fan control service starting..."
 
+# Signal readiness early so a Type=notify unit doesn't hit its start timeout
+# during the MQTT state fetch below; WatchdogSec supervision starts from here.
+notify_systemd --ready
+
 # Fetch retained MQTT messages on startup (retry up to 30 times every 2 seconds)
 log "Fetching MQTT state..."
 MQTT_OUTPUT=""
@@ -731,6 +804,7 @@ trap cleanup EXIT TERM INT
 if $SERVICE; then
     while true; do
         set_fan_speed
+        notify_systemd WATCHDOG=1
         sleep 1
     done
 else
