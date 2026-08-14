@@ -137,6 +137,7 @@ class UNASMonitor:
 
         self._admin_uid = None
         self._api_warned = False
+        self._protect_api_warned = False
         self.bay_cache = {}
         self.known_drives = set()
         self.previous_drive_map = {}  # serial -> bay
@@ -239,7 +240,43 @@ class UNASMonitor:
                 self._api_warned = True
         return None
 
+    def _fetch_protect_bootstrap(self):
+        uid = self._get_admin_user_id()
+        if not uid:
+            if not self._protect_api_warned:
+                logger.warning("Cannot determine admin user ID for Protect API auth")
+                self._protect_api_warned = True
+            return None
+
+        try:
+            conn = http.client.HTTPConnection('127.0.0.1', 7080, timeout=5)
+            headers = {
+                'X-UserId': uid,
+                'X-UserRole': 'admin',
+            }
+            conn.request('GET', '/api/bootstrap', headers=headers)
+            resp = conn.getresponse()
+            if resp.status == 200:
+                return json.loads(resp.read())
+            if not self._protect_api_warned:
+                logger.warning("Protect API /api/bootstrap returned %d", resp.status)
+                self._protect_api_warned = True
+        except (OSError, json.JSONDecodeError) as e:
+            if not self._protect_api_warned:
+                logger.warning("Protect API unavailable (%s)", e)
+                self._protect_api_warned = True
+        return None
+
     def get_pools_from_api(self):
+        if DEVICE_MODEL.startswith("UNVR"):
+            pools = self.get_pools()
+            bootstrap = self._fetch_protect_bootstrap()
+            if bootstrap:
+                corruption_state = (bootstrap.get('nvr') or {}).get('corruptionState') or 'unknown'
+                for pool in pools:
+                    pool['status'] = corruption_state
+            return pools
+
         data = self._fetch_api('/api/v2/storage')
         if not data or 'pools' not in data:
             return self.get_pools()
@@ -682,13 +719,17 @@ class UNASMonitor:
             if size_gb <= 75:
                 continue
 
-            pools.append({
+            pool = {
                 'pool': pool_num,
                 'size': size_gb,
                 'used': round(int(parts[2]) / (1000 ** 3)),
                 'available': round(int(parts[3]) / (1000 ** 3)),
-                'usage': int(parts[4].rstrip('%'))
-            })
+                'usage': int(parts[4].rstrip('%')),
+            }
+            if ATA_TO_BAY and len(set(ATA_TO_BAY.values())) <= 1:
+                pool['raid_level'] = 'none'
+
+            pools.append(pool)
             pool_num += 1
 
         return pools
