@@ -100,36 +100,40 @@ ATA_TO_BAY = BAY_MAPPINGS.get(DEVICE_MODEL)
 
 
 class UNASMonitor:
-    def __init__(self):
-        self.mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        self.mqtt.username_pw_set(MQTT_USER, MQTT_PASS)
-        if MQTT_TLS == "true":
-            import ssl
-            if MQTT_TLS_INSECURE == "true":
-                self.mqtt.tls_set(cert_reqs=ssl.CERT_NONE)
-                self.mqtt.tls_insecure_set(True)
-            else:
-                self.mqtt.tls_set()
-        self.mqtt.on_connect = self._on_connect
-        self.mqtt.on_disconnect = self._on_disconnect
-        self.mqtt.on_message = self._on_message
+    def __init__(self, mqtt_enabled=True):
+        self.mqtt_enabled = mqtt_enabled
+        self.mqtt = None
         self._connected = False
         self.monitor_interval = DEFAULT_MONITOR_INTERVAL
 
-        self.mqtt.will_set(MQTT_AVAILABILITY, "offline", retain=True)
-        self.mqtt.loop_start()
-        try:
-            self.mqtt.connect(MQTT_HOST, int(MQTT_PORT), 60)
-        except Exception as e:
-            logger.warning(f"Initial MQTT connect failed (will retry): {e}")
+        if mqtt_enabled:
+            self.mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+            self.mqtt.username_pw_set(MQTT_USER, MQTT_PASS)
+            if MQTT_TLS == "true":
+                import ssl
+                if MQTT_TLS_INSECURE == "true":
+                    self.mqtt.tls_set(cert_reqs=ssl.CERT_NONE)
+                    self.mqtt.tls_insecure_set(True)
+                else:
+                    self.mqtt.tls_set()
+            self.mqtt.on_connect = self._on_connect
+            self.mqtt.on_disconnect = self._on_disconnect
+            self.mqtt.on_message = self._on_message
 
-        for _ in range(30):
-            if self._connected:
-                break
-            time.sleep(1)
+            self.mqtt.will_set(MQTT_AVAILABILITY, "offline", retain=True)
+            self.mqtt.loop_start()
+            try:
+                self.mqtt.connect(MQTT_HOST, int(MQTT_PORT), 60)
+            except Exception as e:
+                logger.warning(f"Initial MQTT connect failed (will retry): {e}")
 
-        if not self._connected:
-            logger.warning("MQTT not connected after 30s - will keep retrying in background")
+            for _ in range(30):
+                if self._connected:
+                    break
+                time.sleep(1)
+
+            if not self._connected:
+                logger.warning("MQTT not connected after 30s - will keep retrying in background")
 
         self._admin_uid = None
         self._api_warned = False
@@ -608,7 +612,10 @@ class UNASMonitor:
 
         self.previous_drive_map = current_drive_map
         drive_temps = [d['temperature'] for d in drives if d.get('temperature', 0) > 0]
-        self.write_hdd_temps(drive_temps if drive_temps else [0])
+        # Only maintain the shared temp file (read by the fan-control daemon)
+        # when running as the live service, not during a one-shot collection.
+        if self.mqtt_enabled:
+            self.write_hdd_temps(drive_temps if drive_temps else [0])
         return drives
 
     def get_nvme_drives(self):
@@ -835,6 +842,59 @@ class UNASMonitor:
             f"R: {system['disk_read']} MB/s W: {system['disk_write']} MB/s"
         )
 
+    def collect(self) -> dict:
+        """Gather the full metric set as a structured dict (no MQTT required).
+
+        This reuses the same collector methods as the live publish path and is
+        used by the headless `--once --json` mode for troubleshooting, tests,
+        and external consumers.
+        """
+        data: dict = {}
+        data["system"] = self.get_system_metrics()
+
+        hdd = {}
+        for drive in self.get_drives():
+            d = dict(drive)
+            hdd[d.pop("bay")] = d
+        data["hdd"] = hdd
+
+        nvme = {}
+        for n in self.get_nvme_drives():
+            d = dict(n)
+            nvme[d.pop("slot")] = d
+        data["nvme"] = nvme
+
+        pools = {}
+        for pool in self.get_pools_from_api():
+            d = dict(pool)
+            pools[d.pop("pool")] = d
+        data["pools"] = pools
+
+        # UNVR doesn't have SMB/NFS/shares
+        if not DEVICE_MODEL.startswith("UNVR"):
+            smb_connections = self.get_smb_connections()
+            smb_shares = self.get_smb_shares()
+            clients = []
+            for share in smb_shares:
+                conn = smb_connections.get(share['pid'], {})
+                clients.append({
+                    'username': conn.get('username', 'unknown'),
+                    'ip': share['ip'],
+                    'share': share['share'],
+                })
+            data["smb"] = {"connections": len(smb_shares), "clients": clients}
+
+            nfs_mounts = self.get_nfs_mounts()
+            data["nfs"] = {"mounts": len(nfs_mounts), "clients": nfs_mounts}
+
+            shares = {}
+            for share in self.get_shares():
+                d = dict(share)
+                shares[d.pop("name")] = d
+            data["shares"] = shares
+
+        return data
+
     def run(self):
         logger.info(f"UNAS monitor started (interval: {self.monitor_interval}s)")
         
@@ -854,6 +914,28 @@ class UNASMonitor:
             time.sleep(self.monitor_interval)
 
 
-if __name__ == '__main__':
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="UniFi UNAS monitor")
+    parser.add_argument(
+        "--once", action="store_true",
+        help="Run a single collection cycle and exit, without connecting to MQTT.",
+    )
+    parser.add_argument(
+        "--json", action="store_true",
+        help="Print the collected metrics as JSON to stdout (implies --once).",
+    )
+    args = parser.parse_args()
+
+    if args.once or args.json:
+        monitor = UNASMonitor(mqtt_enabled=False)
+        data = monitor.collect()
+        print(json.dumps(data, indent=2, default=str))
+        return
+
     monitor = UNASMonitor()
     monitor.run()
+
+
+if __name__ == '__main__':
+    main()
