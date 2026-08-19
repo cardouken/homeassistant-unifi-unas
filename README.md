@@ -229,6 +229,14 @@ Instead of using a password, you can configure SSH key authentication for more s
 
 The integration will automatically detect and use the SSH key.
 
+### SSH Host Key Verification (Optional)
+
+By default the SSH connection to the NAS does not verify the host key. To have the integration verify it, enable **Verify SSH host key** during setup (or reconfigure). On the first successful connection the NAS host key is recorded (trust-on-first-use) and stored with the config entry; every connection afterwards is checked against it, so a man-in-the-middle presenting a different key is rejected.
+
+Alternatively, point **SSH known_hosts file** at a `known_hosts` file on the Home Assistant host; when set it is used to verify the host key and takes precedence over trust-on-first-use.
+
+If the NAS host key legitimately changes (for example after a firmware reinstall), the integration raises a repair notification offering to **re-pin** the new key in one step — no need to remove and re-add the integration. If verification is on and the stored key ever can't be read, the integration fails closed (it won't connect without verifying) and surfaces the same repair. Both options are off/blank by default, preserving current behavior.
+
 ### Secure MQTT (TLS) (Optional)
 
 If your MQTT broker is configured for TLS (e.g., port 8883), enable the **Use TLS** toggle during setup. After submitting the main form, you'll be prompted for:

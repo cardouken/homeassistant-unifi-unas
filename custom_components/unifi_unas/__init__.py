@@ -5,12 +5,13 @@ import logging
 import time
 from datetime import timedelta
 
+import asyncssh
 from packaging.version import Version, InvalidVersion
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.components import mqtt
 from homeassistant.helpers import issue_registry as ir
@@ -27,6 +28,9 @@ from .const import (
     CONF_MQTT_PORT,
     CONF_MQTT_TLS,
     CONF_MQTT_TLS_INSECURE,
+    CONF_VERIFY_HOST_KEY,
+    CONF_KNOWN_HOSTS,
+    CONF_HOST_KEY,
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
     DEFAULT_SCAN_INTERVAL,
@@ -35,7 +39,7 @@ from .const import (
     get_mqtt_root,
     get_mqtt_topics,
 )
-from .ssh_manager import SSHManager
+from .ssh_manager import SSHManager, HostKeyPinError
 from .mqtt_client import UNASMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -166,6 +170,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mqtt_port=entry.data.get(CONF_MQTT_PORT, DEFAULT_MQTT_PORT),
         mqtt_tls=entry.data.get(CONF_MQTT_TLS, False),
         mqtt_tls_insecure=entry.data.get(CONF_MQTT_TLS_INSECURE, False),
+        verify_host_key=entry.data.get(CONF_VERIFY_HOST_KEY, False),
+        known_hosts_path=entry.data.get(CONF_KNOWN_HOSTS),
+        pinned_host_key=entry.data.get(CONF_HOST_KEY),
     )
 
     integration = await async_get_integration(hass, DOMAIN)
@@ -181,6 +188,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ssh_connected = True
         _LOGGER.info("SSH connection established to %s", entry.data[CONF_HOST])
 
+        # Trust-on-first-use: when verification is enabled and nothing is pinned
+        # yet, record the key seen on this first connection so later connections
+        # are verified against it.
+        if (
+            entry.data.get(CONF_VERIFY_HOST_KEY)
+            and not entry.data.get(CONF_HOST_KEY)
+            and manager.server_host_key
+        ):
+            new_data = dict(entry.data)
+            new_data[CONF_HOST_KEY] = manager.server_host_key
+            hass.config_entries.async_update_entry(entry, data=new_data)
+            manager.pinned_host_key = manager.server_host_key
+            _LOGGER.info("Pinned SSH host key for %s", entry.data[CONF_HOST])
+
+        # We connected/verified, so clear any outstanding host-key repair.
+        ir.async_delete_issue(hass, DOMAIN, f"host_key_changed_{entry.entry_id}")
+
         scripts_installed = await manager.scripts_installed()
         if last_deploy_version != current_version or not scripts_installed or is_dev_version:
             mqtt_root = get_mqtt_topics(entry.entry_id)["root"]
@@ -188,6 +212,23 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_data = dict(entry.data)
             new_data[LAST_DEPLOY_VERSION_KEY] = current_version
             hass.config_entries.async_update_entry(entry, data=new_data)
+
+    except (HostKeyPinError, asyncssh.HostKeyNotVerifiable) as err:
+        # The presented key doesn't match the pin (or the pin is unreadable).
+        # Fail closed and raise a repair the user can act on to re-pin.
+        ir.async_create_issue(
+            hass,
+            DOMAIN,
+            f"host_key_changed_{entry.entry_id}",
+            is_fixable=True,
+            severity=ir.IssueSeverity.ERROR,
+            translation_key="host_key_changed",
+            translation_placeholders={"host": entry.data[CONF_HOST]},
+            data={"entry_id": entry.entry_id},
+        )
+        raise ConfigEntryError(
+            f"SSH host-key verification failed for {entry.data[CONF_HOST]}: {err}"
+        ) from err
 
     except Exception as err:
         if not is_existing_installation:

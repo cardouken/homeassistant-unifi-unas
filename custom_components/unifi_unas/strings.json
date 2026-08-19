@@ -14,11 +14,15 @@
           "mqtt_tls": "Use TLS",
           "device_model": "Device Model",
           "device_name": "Device Name",
+          "verify_host_key": "Verify SSH host key",
+          "known_hosts": "SSH known_hosts file (optional)",
           "scan_interval": "Polling Interval (seconds, 5-60)"
         },
         "data_description": {
           "mqtt_tls": "Only enable if your MQTT broker is configured for TLS (port 8883). Leave off for standard setups.",
-          "device_name": "Optional custom name (e.g. UNAS Pro Hallway) - will be used for entity ID-s, e.g.: sensor.unas_pro_hallway_cpu_temperature"
+          "device_name": "Optional custom name (e.g. UNAS Pro Hallway) - will be used for entity ID-s, e.g.: sensor.unas_pro_hallway_cpu_temperature",
+          "verify_host_key": "Verify the NAS SSH host key. On the first connection the key is recorded (trust-on-first-use) and checked on every connection after that. Leave off to keep the current permissive behavior.",
+          "known_hosts": "Optional path on the Home Assistant host to a known_hosts file to verify the NAS host key against. Takes precedence over trust-on-first-use pinning when set."
         }
       },
       "mqtt_tls": {
@@ -45,12 +49,16 @@
           "mqtt_tls": "Use TLS",
           "device_model": "Device Model",
           "device_name": "Device Name",
+          "verify_host_key": "Verify SSH host key",
+          "known_hosts": "SSH known_hosts file (optional)",
           "scan_interval": "Polling Interval (seconds, 5-60)"
         },
         "data_description": {
           "mqtt_tls": "Only enable if your MQTT broker is configured for TLS (port 8883). Leave off for standard setups.",
           "device_model": "WARNING: Changing the device model requires deleting and re-adding the integration to update drive entities.",
-          "device_name": "Changes device display names only. Entity IDs are set at initial setup and cannot be changed here."
+          "device_name": "Changes device display names only. Entity IDs are set at initial setup and cannot be changed here.",
+          "verify_host_key": "Verify the NAS SSH host key. On the first connection the key is recorded (trust-on-first-use) and checked on every connection after that. Leave off to keep the current permissive behavior.",
+          "known_hosts": "Optional path on the Home Assistant host to a known_hosts file to verify the NAS host key against. Takes precedence over trust-on-first-use pinning when set."
         }
       },
       "reconfigure_mqtt_tls": {
@@ -105,6 +113,17 @@
     "ssh_unavailable": {
       "title": "UNAS SSH connection unavailable",
       "description": "Home Assistant has been unable to connect to your UniFi UNAS at `{host}` via SSH for over 10 minutes. Without SSH, the integration cannot check or redeploy monitoring scripts.\n\nThis can happen after a firmware upgrade if the SSH password was reset. Verify that you can SSH into the UNAS manually, then reload the integration.\n\nIf the password changed, update it via the integration's reconfigure option."
+    },
+    "host_key_changed": {
+      "title": "UniFi UNAS SSH host key changed",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Re-pin the UniFi UNAS SSH host key",
+            "description": "The SSH host key presented by the NAS at {host} no longer matches the pinned key. If you expected this (for example after a firmware reinstall), select **Submit** to trust the new key and re-pin it. If you did not expect it, cancel and investigate before continuing."
+          }
+        }
+      }
     }
   }
 }
