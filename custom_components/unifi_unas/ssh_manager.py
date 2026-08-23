@@ -41,7 +41,6 @@ class SSHManager:
             mqtt_tls: bool = False,
             mqtt_tls_insecure: bool = False,
             verify_host_key: bool = False,
-            known_hosts_path: Optional[str] = None,
             pinned_host_key: Optional[str] = None,
     ) -> None:
         self.host = host
@@ -56,7 +55,6 @@ class SSHManager:
         self.mqtt_tls = mqtt_tls
         self.mqtt_tls_insecure = mqtt_tls_insecure
         self.verify_host_key = verify_host_key
-        self.known_hosts_path = known_hosts_path
         self.pinned_host_key = pinned_host_key
         # Populated on connect with the server's host key in known_hosts form
         # ("host keytype base64"), for trust-on-first-use pinning by the caller.
@@ -114,15 +112,12 @@ class SSHManager:
         """Choose the asyncssh known_hosts argument.
 
         Precedence:
-        1. A user-supplied known_hosts file path.
-        2. If verification is enabled and a key has been pinned, verify against
+        1. If verification is enabled and a key has been pinned, verify against
            just that key. If the stored pin can't be parsed, fail closed by
            raising HostKeyPinError rather than falling back to no verification.
-        3. Otherwise None -- verification disabled (default behavior), and the
+        2. Otherwise None -- verification disabled (default behavior), and the
            permissive first connection that trust-on-first-use captures from.
         """
-        if self.known_hosts_path:
-            return self.known_hosts_path
         if self.verify_host_key and self.pinned_host_key:
             try:
                 return asyncssh.import_known_hosts(self.pinned_host_key)

@@ -8,7 +8,7 @@ from homeassistant import data_entry_flow
 from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_HOST_KEY
+from .const import CONF_HOST, CONF_HOST_KEY
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,8 +27,8 @@ class HostKeyChangedRepairFlow(RepairsFlow):
     async def async_step_confirm(
         self, user_input: dict[str, str] | None = None
     ) -> data_entry_flow.FlowResult:
+        entry = self.hass.config_entries.async_get_entry(self._entry_id)
         if user_input is not None:
-            entry = self.hass.config_entries.async_get_entry(self._entry_id)
             if entry is not None:
                 # Clear the stored pin; the next connection re-pins via
                 # trust-on-first-use and reloading applies it immediately.
@@ -38,7 +38,12 @@ class HostKeyChangedRepairFlow(RepairsFlow):
                 await self.hass.config_entries.async_reload(self._entry_id)
             return self.async_create_entry(title="", data={})
 
-        return self.async_show_form(step_id="confirm", data_schema=vol.Schema({}))
+        host = entry.data.get(CONF_HOST, "") if entry is not None else ""
+        return self.async_show_form(
+            step_id="confirm",
+            data_schema=vol.Schema({}),
+            description_placeholders={"host": host},
+        )
 
 
 async def async_create_fix_flow(

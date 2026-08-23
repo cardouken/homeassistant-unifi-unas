@@ -29,7 +29,6 @@ from .const import (
     CONF_MQTT_TLS,
     CONF_MQTT_TLS_INSECURE,
     CONF_VERIFY_HOST_KEY,
-    CONF_KNOWN_HOSTS,
     CONF_HOST_KEY,
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
@@ -171,7 +170,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         mqtt_tls=entry.data.get(CONF_MQTT_TLS, False),
         mqtt_tls_insecure=entry.data.get(CONF_MQTT_TLS_INSECURE, False),
         verify_host_key=entry.data.get(CONF_VERIFY_HOST_KEY, False),
-        known_hosts_path=entry.data.get(CONF_KNOWN_HOSTS),
         pinned_host_key=entry.data.get(CONF_HOST_KEY),
     )
 
@@ -215,7 +213,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     except (HostKeyPinError, asyncssh.HostKeyNotVerifiable) as err:
         # The presented key doesn't match the pin (or the pin is unreadable).
-        # Fail closed and raise a repair the user can act on to re-pin.
+        # Raise a repair the user can act on to re-pin, then degrade the same
+        # way any other SSH failure does: SSH is only used for script
+        # deploys/service status/backups, while all sensor data arrives over
+        # MQTT. On an existing install we keep those MQTT sensors running and
+        # only block a first-time setup.
         ir.async_create_issue(
             hass,
             DOMAIN,
@@ -226,9 +228,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             translation_placeholders={"host": entry.data[CONF_HOST]},
             data={"entry_id": entry.entry_id},
         )
-        raise ConfigEntryError(
-            f"SSH host-key verification failed for {entry.data[CONF_HOST]}: {err}"
-        ) from err
+        if not is_existing_installation:
+            raise ConfigEntryError(
+                f"SSH host-key verification failed for {entry.data[CONF_HOST]}: {err}"
+            ) from err
+        _LOGGER.warning(
+            "SSH host-key verification failed for %s; continuing with MQTT data "
+            "only until the key is re-pinned via the repair: %s",
+            entry.data[CONF_HOST],
+            err,
+        )
 
     except Exception as err:
         if not is_existing_installation:

@@ -38,7 +38,6 @@ from .const import (
     CONF_MQTT_TLS,
     CONF_MQTT_TLS_INSECURE,
     CONF_VERIFY_HOST_KEY,
-    CONF_KNOWN_HOSTS,
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
     CONF_DEVICE_NAME,
@@ -66,7 +65,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         ),
         vol.Optional(CONF_DEVICE_NAME, default="UNAS"): str,
         vol.Optional(CONF_VERIFY_HOST_KEY, default=False): BooleanSelector(),
-        vol.Optional(CONF_KNOWN_HOSTS): str,
         vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): NumberSelector(
             NumberSelectorConfig(
                 min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX
@@ -95,8 +93,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if new_model != old_model:
                 errors["base"] = "model_changed"
             elif error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
-                                                   user_input.get(CONF_PASSWORD),
-                                                   user_input.get(CONF_KNOWN_HOSTS)):
+                                                   user_input.get(CONF_PASSWORD)):
                 errors["base"] = error_key
             elif user_input.get(CONF_MQTT_TLS):
                 self._pending_input = user_input
@@ -142,10 +139,6 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_VERIFY_HOST_KEY,
                     default=entry.data.get(CONF_VERIFY_HOST_KEY, False),
                 ): BooleanSelector(),
-                vol.Optional(
-                    CONF_KNOWN_HOSTS,
-                    default=entry.data.get(CONF_KNOWN_HOSTS) or "",
-                ): str,
                 vol.Optional(CONF_SCAN_INTERVAL,
                              default=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): NumberSelector(
                     NumberSelectorConfig(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX)
@@ -214,8 +207,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             if error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
-                                                 user_input.get(CONF_PASSWORD),
-                                                 user_input.get(CONF_KNOWN_HOSTS)):
+                                                 user_input.get(CONF_PASSWORD)):
                 errors["base"] = error_key
             elif user_input.get(CONF_MQTT_TLS):
                 self._pending_input = user_input
@@ -272,10 +264,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         })
         return self.async_show_form(step_id="mqtt_tls", data_schema=schema, errors=errors)
 
-    async def _test_ssh(
-        self, host: str, username: str, password: str | None,
-        known_hosts_path: str | None = None,
-    ) -> str | None:
+    async def _test_ssh(self, host: str, username: str, password: str | None) -> str | None:
         try:
             client_keys = None
             if not password:
@@ -291,7 +280,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     username=username,
                     password=password if password else None,
                     client_keys=client_keys,
-                    known_hosts=known_hosts_path or None,
+                    known_hosts=None,
                 ),
                 timeout=10.0,
             )
