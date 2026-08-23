@@ -20,6 +20,8 @@ CONF_MQTT_PASSWORD = "mqtt_password"
 CONF_MQTT_PORT = "mqtt_port"
 CONF_MQTT_TLS = "mqtt_tls"
 CONF_MQTT_TLS_INSECURE = "mqtt_tls_insecure"
+CONF_VERIFY_HOST_KEY = "verify_host_key"
+CONF_HOST_KEY = "host_key"
 CONF_SCAN_INTERVAL = "scan_interval"
 
 DEFAULT_MQTT_PORT = 1883

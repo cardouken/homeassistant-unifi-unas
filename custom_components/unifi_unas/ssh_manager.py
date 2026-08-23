@@ -18,6 +18,14 @@ SCRIPTS_DIR = Path(__file__).parent / "scripts"
 SSH_CONNECT_TIMEOUT = 30
 
 
+class HostKeyPinError(Exception):
+    """Raised when host-key verification is enabled but the stored pin is unusable.
+
+    Kept distinct from asyncssh's own errors so setup can fail closed (rather
+    than silently connecting without verification) and surface a repair.
+    """
+
+
 class SSHManager:
     def __init__(
             self,
@@ -32,6 +40,8 @@ class SSHManager:
             mqtt_port: int = 1883,
             mqtt_tls: bool = False,
             mqtt_tls_insecure: bool = False,
+            verify_host_key: bool = False,
+            pinned_host_key: Optional[str] = None,
     ) -> None:
         self.host = host
         self.username = username
@@ -44,6 +54,11 @@ class SSHManager:
         self.mqtt_port = mqtt_port
         self.mqtt_tls = mqtt_tls
         self.mqtt_tls_insecure = mqtt_tls_insecure
+        self.verify_host_key = verify_host_key
+        self.pinned_host_key = pinned_host_key
+        # Populated on connect with the server's host key in known_hosts form
+        # ("host keytype base64"), for trust-on-first-use pinning by the caller.
+        self.server_host_key: Optional[str] = None
         self._conn: Optional[asyncssh.SSHClientConnection] = None
         self._lock = asyncio.Lock()
 
@@ -77,6 +92,8 @@ class SSHManager:
                         _LOGGER.debug("Using SSH key from %s", key_path)
                         break
 
+            known_hosts = self._resolve_known_hosts()
+
             self._conn = await asyncio.wait_for(
                 asyncssh.connect(
                     self.host,
@@ -84,11 +101,45 @@ class SSHManager:
                     username=self.username,
                     password=self.password if self.password else None,
                     client_keys=client_keys,
-                    known_hosts=None,
+                    known_hosts=known_hosts,
                 ),
                 timeout=SSH_CONNECT_TIMEOUT,
             )
+            self._capture_server_host_key()
             _LOGGER.debug("SSH connection established")
+
+    def _resolve_known_hosts(self):
+        """Choose the asyncssh known_hosts argument.
+
+        Precedence:
+        1. If verification is enabled and a key has been pinned, verify against
+           just that key. If the stored pin can't be parsed, fail closed by
+           raising HostKeyPinError rather than falling back to no verification.
+        2. Otherwise None -- verification disabled (default behavior), and the
+           permissive first connection that trust-on-first-use captures from.
+        """
+        if self.verify_host_key and self.pinned_host_key:
+            try:
+                return asyncssh.import_known_hosts(self.pinned_host_key)
+            except (ValueError, asyncssh.Error) as err:
+                raise HostKeyPinError(
+                    f"Stored SSH host key for {self.host} is unreadable: {err}"
+                ) from err
+        return None
+
+    def _capture_server_host_key(self) -> None:
+        """Record the server's host key in known_hosts form for TOFU pinning."""
+        if self._conn is None:
+            return
+        try:
+            key = self._conn.get_server_host_key()
+            parts = key.export_public_key().decode().strip().split()
+        except Exception:  # noqa: BLE001 - best-effort capture
+            return
+        if len(parts) < 2:
+            return
+        hostspec = self.host if self.port == 22 else f"[{self.host}]:{self.port}"
+        self.server_host_key = f"{hostspec} {parts[0]} {parts[1]}"
 
     async def disconnect(self) -> None:
         async with self._lock:
