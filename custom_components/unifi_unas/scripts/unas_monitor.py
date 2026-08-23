@@ -144,6 +144,7 @@ class UNASMonitor:
         self._protect_api_warned = False
         self.bay_cache = {}
         self.known_drives = set()
+        self.warned_unmapped_ata = set()
         self.previous_drive_map = {}  # serial -> bay
         self.drive_removed_at = {}  # serial -> (timestamp, bay)
         self.grace_period = 60
@@ -537,8 +538,29 @@ class UNASMonitor:
         output = self.run_cmd(['udevadm', 'info', '-q', 'path', '-n', f'/dev/{device}'])
         bay = None
         for part in output.split('/'):
-            if part.startswith('ata') and (ata_num := part[3:]) in ATA_TO_BAY:
-                bay = ATA_TO_BAY[ata_num]
+            if part.startswith('ata') and part[3:].isdigit():
+                ata_num = part[3:]
+                if ATA_TO_BAY and ata_num in ATA_TO_BAY:
+                    bay = ATA_TO_BAY[ata_num]
+                else:
+                    # The per-model ATA_TO_BAY tables are community-sourced and
+                    # can be incomplete: a unit may populate an ata port that the
+                    # reference unit for this model did not. Rather than silently
+                    # dropping the drive -- which hides a real disk, including a
+                    # RAID member, from monitoring entirely -- fall back to
+                    # labeling the bay by its ata port. The "ata" prefix keeps it
+                    # from colliding with a mapped numeric bay. Logged once so the
+                    # correct mapping can be reported and added.
+                    bay = f"ata{ata_num}"
+                    if ata_num not in self.warned_unmapped_ata:
+                        self.warned_unmapped_ata.add(ata_num)
+                        logger.warning(
+                            "No %s bay mapping for ata%s (/dev/%s); reporting it "
+                            "as bay '%s' so the drive is still monitored. Please "
+                            "report this device model's ata->bay layout so the "
+                            "mapping can be completed.",
+                            DEVICE_MODEL, ata_num, device, bay,
+                        )
                 break
 
         self.bay_cache[device] = bay
