@@ -19,6 +19,17 @@ SSH_CONNECT_TIMEOUT = 30
 # check for paho 2.x specifically, some firmware builds ship the 1.5.1 apt package (#43)
 PAHO_PROBE = "python3 -c 'import paho.mqtt.client as m; m.CallbackAPIVersion'"
 
+# TODO: remove all of the below at some point once we deem UniFi OS 5 deprecated and unsupported
+# Debian 11 (UniFi OS 5) is EOL since 2026-08-31 and bullseye-security has started pruning debs,
+# so the plain install 404s. these are the bullseye main builds that are still available (#43)
+BULLSEYE_APT_FALLBACK = (
+    "apt-get install -y --allow-downgrades --no-install-recommends "
+    "mosquitto-clients=2.0.11-1+deb11u1 libmosquitto1=2.0.11-1+deb11u1 libcjson1=1.7.14-1+deb11u1 "
+    "python3-pip=20.3.4-4+deb11u1 python-pip-whl=20.3.4-4+deb11u1 "
+    "python3-setuptools=52.0.0-4 python3-pkg-resources=52.0.0-4"
+)
+APT_TOOLS_PROBE = "which mosquitto_sub >/dev/null 2>&1 && which pip3 >/dev/null 2>&1 && echo ok"
+
 
 class SSHManager:
     def __init__(
@@ -199,7 +210,17 @@ class SSHManager:
             await self._upload_file("/root/fan_control.sh", fan_control_script, executable=True)
             await self._upload_file("/etc/systemd/system/fan_control.service", fan_control_service)
 
-            await self.execute_command("apt-get update && apt-get install -y mosquitto-clients python3-pip")
+            await self.execute_command("apt-get update")
+            _, apt_stderr = await self.execute_command(
+                "apt-get install -y --no-install-recommends mosquitto-clients python3-pip"
+            )
+            stdout, _ = await self.execute_command(APT_TOOLS_PROBE)
+            if stdout.strip() != "ok":
+                _, fallback_stderr = await self.execute_command(BULLSEYE_APT_FALLBACK)
+                apt_stderr = f"{apt_stderr.strip()}\nfallback: {fallback_stderr.strip()}"
+                stdout, _ = await self.execute_command(APT_TOOLS_PROBE)
+            if stdout.strip() != "ok":
+                raise RuntimeError(f"apt install failed: {apt_stderr.strip()}")
             # --break-system-packages is required on UniFi OS 6 (Debian 13, PEP 668) and unknown to
             # the pip shipped with OS 5 (Debian 11), so try it first and fall back
             _, pip_stderr = await self.execute_command(
