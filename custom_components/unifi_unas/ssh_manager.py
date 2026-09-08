@@ -198,7 +198,12 @@ class SSHManager:
             await self._upload_file("/etc/systemd/system/fan_control.service", fan_control_service)
 
             await self.execute_command("apt-get update && apt-get install -y mosquitto-clients python3-pip")
-            await self.execute_command("pip3 install --ignore-installed paho-mqtt==2.1.0")
+            # --break-system-packages is required on UniFi OS 6 (Debian 13, PEP 668) and unknown to
+            # the pip shipped with OS 5 (Debian 11), so try it first and fall back
+            await self.execute_command(
+                "pip3 install --ignore-installed --break-system-packages paho-mqtt==2.1.0 "
+                "|| pip3 install --ignore-installed paho-mqtt==2.1.0"
+            )
 
             await self.execute_command("systemctl daemon-reload")
             await self.execute_command("systemctl enable unas_monitor")
