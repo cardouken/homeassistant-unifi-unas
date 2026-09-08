@@ -16,6 +16,8 @@ _LOGGER = logging.getLogger(__name__)
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
 SSH_CONNECT_TIMEOUT = 30
+# check for paho 2.x specifically, some firmware builds ship the 1.5.1 apt package (#43)
+PAHO_PROBE = "python3 -c 'import paho.mqtt.client as m; m.CallbackAPIVersion'"
 
 
 class SSHManager:
@@ -108,7 +110,7 @@ class SSHManager:
     async def scripts_installed(self) -> bool:
         stdout, _ = await self.execute_command(
             "test -f /root/unas_monitor.py && test -f /root/fan_control.sh "
-            "&& python3 -c 'import paho.mqtt.client' 2>/dev/null "
+            f"&& {PAHO_PROBE} 2>/dev/null "
             "&& which mosquitto_sub >/dev/null 2>&1 "
             "&& echo 'yes' || echo 'no'"
         )
@@ -200,10 +202,15 @@ class SSHManager:
             await self.execute_command("apt-get update && apt-get install -y mosquitto-clients python3-pip")
             # --break-system-packages is required on UniFi OS 6 (Debian 13, PEP 668) and unknown to
             # the pip shipped with OS 5 (Debian 11), so try it first and fall back
-            await self.execute_command(
+            _, pip_stderr = await self.execute_command(
                 "pip3 install --ignore-installed --break-system-packages paho-mqtt==2.1.0 "
                 "|| pip3 install --ignore-installed paho-mqtt==2.1.0"
             )
+            stdout, _ = await self.execute_command(f"{PAHO_PROBE} 2>/dev/null && echo ok")
+            if stdout.strip() != "ok":
+                raise RuntimeError(
+                    f"paho-mqtt 2.x not importable after pip install: {pip_stderr.strip()}"
+                )
 
             await self.execute_command("systemctl daemon-reload")
             await self.execute_command("systemctl enable unas_monitor")
