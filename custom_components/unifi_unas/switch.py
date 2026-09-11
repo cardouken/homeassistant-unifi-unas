@@ -108,4 +108,4 @@ class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
         schedule = task.get("schedule", {}).copy()
         schedule["enable"] = enabled
         await self.coordinator.ssh_manager.update_backup_task(self._task_id, {"schedule": schedule})
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh_ssh_status()

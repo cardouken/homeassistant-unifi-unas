@@ -4,6 +4,7 @@ import asyncio
 import logging
 import time
 from datetime import timedelta
+from typing import Any
 
 from packaging.version import Version, InvalidVersion
 
@@ -34,6 +35,7 @@ from .const import (
     DEFAULT_MQTT_PORT,
     get_mqtt_root,
     get_mqtt_topics,
+    SSH_STATUS_INTERVAL,
 )
 from .ssh_manager import SSHManager
 from .mqtt_client import UNASMQTTClient
@@ -317,6 +319,8 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
         self.sensor_add_entities = None
         self.button_add_entities = None
         self.switch_add_entities = None
+        self._ssh_status: dict[str, Any] = {}
+        self._ssh_checked_at: float | None = None
 
         super().__init__(
             hass,
@@ -367,6 +371,57 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
             "mqtt_data": self.mqtt_client.get_data(),
         }
 
+        now = time.monotonic()
+        ssh_due = (
+            self._ssh_checked_at is None
+            or self.pending_script_deploy
+            or now - self._ssh_checked_at >= SSH_STATUS_INTERVAL
+        )
+        if ssh_due:
+            self._ssh_checked_at = now
+            await self._async_update_ssh_status(data)
+            self._ssh_status = {
+                key: data[key]
+                for key in (
+                    "scripts_installed",
+                    "ssh_connected",
+                    "monitor_running",
+                    "fan_control_running",
+                    "backup_tasks",
+                )
+                if key in data
+            }
+        else:
+            data.update(self._ssh_status)
+
+        try:
+            if self.sensor_add_entities is not None:
+                from .sensor import (
+                    _discover_and_add_drive_sensors,
+                    _discover_and_add_nvme_sensors,
+                    _discover_and_add_pool_sensors,
+                    _discover_and_add_share_sensors,
+                    _discover_and_add_backup_sensors,
+                )
+                await _discover_and_add_drive_sensors(self, self.sensor_add_entities)
+                await _discover_and_add_nvme_sensors(self, self.sensor_add_entities)
+                await _discover_and_add_pool_sensors(self, self.sensor_add_entities)
+                await _discover_and_add_share_sensors(self, self.sensor_add_entities)
+                await _discover_and_add_backup_sensors(self, self.sensor_add_entities)
+
+            if self.button_add_entities is not None:
+                from .button import _discover_and_add_backup_buttons
+                await _discover_and_add_backup_buttons(self, self.button_add_entities)
+
+            if self.switch_add_entities is not None:
+                from .switch import _discover_and_add_backup_switches
+                await _discover_and_add_backup_switches(self, self.switch_add_entities)
+        except Exception as err:
+            _LOGGER.error("Error during entity discovery: %s", err)
+
+        return data
+
+    async def _async_update_ssh_status(self, data: dict[str, Any]) -> None:
         try:
             scripts_installed = await self.ssh_manager.scripts_installed()
 
@@ -428,33 +483,6 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
                     },
                 )
 
-        try:
-            if self.sensor_add_entities is not None:
-                from .sensor import (
-                    _discover_and_add_drive_sensors,
-                    _discover_and_add_nvme_sensors,
-                    _discover_and_add_pool_sensors,
-                    _discover_and_add_share_sensors,
-                    _discover_and_add_backup_sensors,
-                )
-                await _discover_and_add_drive_sensors(self, self.sensor_add_entities)
-                await _discover_and_add_nvme_sensors(self, self.sensor_add_entities)
-                await _discover_and_add_pool_sensors(self, self.sensor_add_entities)
-                await _discover_and_add_share_sensors(self, self.sensor_add_entities)
-                await _discover_and_add_backup_sensors(self, self.sensor_add_entities)
-
-            if self.button_add_entities is not None:
-                from .button import _discover_and_add_backup_buttons
-                await _discover_and_add_backup_buttons(self, self.button_add_entities)
-
-            if self.switch_add_entities is not None:
-                from .switch import _discover_and_add_backup_switches
-                await _discover_and_add_backup_switches(self, self.switch_add_entities)
-        except Exception as err:
-            _LOGGER.error("Error during entity discovery: %s", err)
-
-        return data
-
     def find_backup_task(self, task_id: str):
         for task in self.data.get("backup_tasks", []):
             if task["id"] == task_id:
@@ -465,4 +493,8 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
         device_model = self.entry.data[CONF_DEVICE_MODEL]
         mqtt_root = get_mqtt_topics(self.entry.entry_id)["root"]
         await self.ssh_manager.deploy_scripts(device_model, mqtt_root)
+        await self.async_refresh_ssh_status()
+
+    async def async_refresh_ssh_status(self) -> None:
+        self._ssh_checked_at = None
         await self.async_request_refresh()

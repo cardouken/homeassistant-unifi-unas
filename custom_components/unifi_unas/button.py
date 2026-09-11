@@ -177,4 +177,4 @@ class UNASBackupTriggerButton(CoordinatorEntity, ButtonEntity):
         )
         if result.get("data") != "OK":
             raise HomeAssistantError(f"Failed to trigger backup: {result}")
-        await self.coordinator.async_request_refresh()
+        await self.coordinator.async_refresh_ssh_status()
