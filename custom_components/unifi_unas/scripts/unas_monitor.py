@@ -37,6 +37,11 @@ MQTT_CONTROL = f"{MQTT_ROOT}/control"
 MONITOR_INTERVAL_TOPIC = f"{MQTT_CONTROL}/monitor_interval"
 SHARED_TEMP_FILE = "/tmp/unas_hdd_temp"
 MONITOR_INTERVAL_FILE = "/tmp/unas_monitor_interval"
+# HA drops MQTT keys it has not seen for 120s, so unchanged values are
+# re-asserted at least this often; changed values publish immediately.
+REPUBLISH_INTERVAL = 60
+SHARE_CACHE_TTL = 300
+_UNSET = object()
 
 DEVICE_MODEL = "UNAS_PRO"
 
@@ -109,6 +114,12 @@ class UNASMonitor:
         self.mqtt = None
         self._connected = False
         self.monitor_interval = DEFAULT_MONITOR_INTERVAL
+        # anything _on_connect touches must exist before the connect wait below,
+        # paho fires the callback from its own thread
+        self._last_published = {}  # topic -> (payload, monotonic ts)
+        self._storage = _UNSET  # /api/v2/storage, fetched once per cycle
+        self._user_map_cache = None  # (ts, user_map, console_owner)
+        self._share_members_cache = {}  # drive_id -> (ts, member_count, members)
 
         if mqtt_enabled:
             self.mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
@@ -165,6 +176,7 @@ class UNASMonitor:
             self._connected = True
             self.mqtt.subscribe(MONITOR_INTERVAL_TOPIC)
             self.mqtt.publish(MQTT_AVAILABILITY, "online", retain=True)
+            self._last_published.clear()
         else:
             logger.error(f"MQTT failed: {reason_code}")
             self._connected = False
@@ -190,20 +202,29 @@ class UNASMonitor:
             except (ValueError, TypeError):
                 pass
 
+    def _publish(self, topic, value):
+        payload = str(value)
+        now = time.monotonic()
+        last = self._last_published.get(topic)
+        if last and last[0] == payload and now - last[1] < REPUBLISH_INTERVAL:
+            return
+        self.mqtt.publish(topic, payload, retain=True)
+        self._last_published[topic] = (payload, now)
+
     def publish_system(self, metric, value):
-        self.mqtt.publish(f"{MQTT_SYSTEM}/{metric}", str(value), retain=True)
-    
+        self._publish(f"{MQTT_SYSTEM}/{metric}", value)
+
     def publish_hdd(self, bay, metric, value):
-        self.mqtt.publish(f"{MQTT_HDD}/{bay}/{metric}", str(value), retain=True)
-    
+        self._publish(f"{MQTT_HDD}/{bay}/{metric}", value)
+
     def publish_nvme(self, slot, metric, value):
-        self.mqtt.publish(f"{MQTT_NVME}/{slot}/{metric}", str(value), retain=True)
+        self._publish(f"{MQTT_NVME}/{slot}/{metric}", value)
     
     def publish_pool(self, pool_num, metric, value):
-        self.mqtt.publish(f"{MQTT_POOL}/{pool_num}/{metric}", str(value), retain=True)
+        self._publish(f"{MQTT_POOL}/{pool_num}/{metric}", value)
 
     def publish_share(self, name, metric, value):
-        self.mqtt.publish(f"{MQTT_SHARE}/{name}/{metric}", str(value), retain=True)
+        self._publish(f"{MQTT_SHARE}/{name}/{metric}", value)
 
     def _get_admin_user_id(self):
         if self._admin_uid:
@@ -219,18 +240,18 @@ class UNASMonitor:
         return None
 
     def _fetch_api(self, path, need_auth=False):
+        headers = {}
+        if need_auth:
+            uid = self._get_admin_user_id()
+            if not uid:
+                if not self._api_warned:
+                    logger.warning("Cannot determine admin user ID for Drive API auth")
+                    self._api_warned = True
+                return None
+            headers['X-UserId'] = uid
+            headers['X-UserRole'] = 'admin'
+        conn = http.client.HTTPConnection('127.0.0.1', 16080, timeout=5)
         try:
-            conn = http.client.HTTPConnection('127.0.0.1', 16080, timeout=5)
-            headers = {}
-            if need_auth:
-                uid = self._get_admin_user_id()
-                if not uid:
-                    if not self._api_warned:
-                        logger.warning("Cannot determine admin user ID for Drive API auth")
-                        self._api_warned = True
-                    return None
-                headers['X-UserId'] = uid
-                headers['X-UserRole'] = 'admin'
             conn.request('GET', path, headers=headers)
             resp = conn.getresponse()
             if resp.status == 200:
@@ -242,7 +263,14 @@ class UNASMonitor:
             if not self._api_warned:
                 logger.warning("Drive API unavailable (%s), falling back to df", e)
                 self._api_warned = True
+        finally:
+            conn.close()
         return None
+
+    def _get_storage(self):
+        if self._storage is _UNSET:
+            self._storage = self._fetch_api('/api/v2/storage')
+        return self._storage
 
     def _fetch_protect_bootstrap(self):
         uid = self._get_admin_user_id()
@@ -252,12 +280,12 @@ class UNASMonitor:
                 self._protect_api_warned = True
             return None
 
+        headers = {
+            'X-UserId': uid,
+            'X-UserRole': 'admin',
+        }
+        conn = http.client.HTTPConnection('127.0.0.1', 7080, timeout=5)
         try:
-            conn = http.client.HTTPConnection('127.0.0.1', 7080, timeout=5)
-            headers = {
-                'X-UserId': uid,
-                'X-UserRole': 'admin',
-            }
             conn.request('GET', '/api/bootstrap', headers=headers)
             resp = conn.getresponse()
             if resp.status == 200:
@@ -269,6 +297,8 @@ class UNASMonitor:
             if not self._protect_api_warned:
                 logger.warning("Protect API unavailable (%s)", e)
                 self._protect_api_warned = True
+        finally:
+            conn.close()
         return None
 
     def get_pools_from_api(self):
@@ -281,7 +311,7 @@ class UNASMonitor:
                     pool['status'] = corruption_state
             return pools
 
-        data = self._fetch_api('/api/v2/storage')
+        data = self._get_storage()
         if not data or 'pools' not in data:
             return self.get_pools()
 
@@ -309,7 +339,10 @@ class UNASMonitor:
         return pools
 
     def _get_user_map(self):
-        data = self._fetch_api('/api/v1/users')
+        cached = self._user_map_cache
+        if cached and time.monotonic() - cached[0] < SHARE_CACHE_TTL:
+            return cached[1], cached[2]
+        data = self._fetch_api('/api/v1/users', need_auth=True)
         if not data or 'data' not in data:
             return {}, None
         user_map = {}
@@ -320,25 +353,37 @@ class UNASMonitor:
             user_map[uid] = name
             if console_owner is None:
                 console_owner = {'id': uid, 'name': name}
+        self._user_map_cache = (time.monotonic(), user_map, console_owner)
         return user_map, console_owner
 
-    def _get_share_members(self, drive_id, member_count, user_map, console_owner):
+    def _get_share_members(self, drive_id, member_count):
+        cached = self._share_members_cache.get(drive_id)
+        if (
+            cached
+            and cached[1] == member_count
+            and time.monotonic() - cached[0] < SHARE_CACHE_TTL
+        ):
+            return cached[2]
+        user_map, console_owner = self._get_user_map()
         detail = self._fetch_api(f'/api/v2/drives/{drive_id}', need_auth=True)
-        if not detail or 'members' not in detail:
+        if detail is None:
             return []
+        # the API omits "members" entirely when only the console owner has access
+        listed = detail.get('members') or []
         members = [
             {"name": user_map.get(m['id'], 'Unknown'), "role": m.get('role', 'unknown')}
-            for m in detail['members']
+            for m in listed
         ]
         # console owner has implicit access to all shares but isn't in the members list
         if console_owner and member_count > len(members):
-            listed_ids = {m['id'] for m in detail['members']}
+            listed_ids = {m['id'] for m in listed}
             if console_owner['id'] not in listed_ids:
                 members.insert(0, {"name": console_owner['name'], "role": "admin"})
+        self._share_members_cache[drive_id] = (time.monotonic(), member_count, members)
         return members
 
     def get_shares(self):
-        storage_data = self._fetch_api('/api/v2/storage')
+        storage_data = self._get_storage()
         pool_id_to_num = {}
         if storage_data and 'pools' in storage_data:
             for pool in storage_data['pools']:
@@ -347,8 +392,6 @@ class UNASMonitor:
         drives_data = self._fetch_api('/api/v2/drives', need_auth=True)
         if not drives_data or 'drives' not in drives_data:
             return []
-
-        user_map, console_owner = self._get_user_map()
 
         shares = []
         for drive in drives_data['drives']:
@@ -360,7 +403,7 @@ class UNASMonitor:
             pool_id = drive.get('storagePoolId', '')
             pool_num = pool_id_to_num.get(pool_id, '?')
             member_count = drive.get('memberCount', 0)
-            members = self._get_share_members(drive['id'], member_count, user_map, console_owner)
+            members = self._get_share_members(drive['id'], member_count)
             shares.append({
                 'name': drive.get('name', 'unknown'),
                 'usage': round(usage_bytes / (1000 ** 3), 2),
@@ -396,12 +439,19 @@ class UNASMonitor:
 
         data['machine_id'] = self.machine_id
 
-        with open('/proc/uptime') as f:
-            data['uptime'] = int(float(f.read().split()[0]))
+        try:
+            with open('/proc/uptime') as f:
+                data['uptime'] = int(float(f.read().split()[0]))
+        except (OSError, ValueError, IndexError):
+            pass
 
-        version_str = open('/usr/lib/version').read().strip()
-        match = re.search(r'\.v(\d+\.\d+\.\d+)\.', version_str)
-        data['os_version'] = match.group(1) if match else version_str
+        try:
+            with open('/usr/lib/version') as f:
+                version_str = f.read().strip()
+            match = re.search(r'\.v(\d+\.\d+\.\d+)\.', version_str)
+            data['os_version'] = match.group(1) if match else version_str
+        except OSError:
+            pass
         if DEVICE_MODEL.startswith("UNVR"):
             data['protect_version'] = self.run_cmd(['dpkg-query', '-W', '-f=${Version}', 'unifi-protect']).strip()
         else:
@@ -816,6 +866,7 @@ class UNASMonitor:
         return mounts
 
     def collect_and_publish(self):
+        self._storage = _UNSET
         system = self.get_system_metrics()
         for key, value in system.items():
             self.publish_system(key, value)
@@ -856,8 +907,8 @@ class UNASMonitor:
                     'share': share['share']
                 })
 
-            self.mqtt.publish(f"{MQTT_SMB}/connections", str(smb_data['count']), retain=True)
-            self.mqtt.publish(f"{MQTT_SMB}/clients", json.dumps(smb_data['clients']), retain=True)
+            self._publish(f"{MQTT_SMB}/connections", smb_data['count'])
+            self._publish(f"{MQTT_SMB}/clients", json.dumps(smb_data['clients']))
 
             nfs_mounts = self.get_nfs_mounts()
             nfs_data = {
@@ -865,8 +916,8 @@ class UNASMonitor:
                 'clients': nfs_mounts
             }
 
-            self.mqtt.publish(f"{MQTT_NFS}/mounts", str(nfs_data['count']), retain=True)
-            self.mqtt.publish(f"{MQTT_NFS}/clients", json.dumps(nfs_data['clients']), retain=True)
+            self._publish(f"{MQTT_NFS}/mounts", nfs_data['count'])
+            self._publish(f"{MQTT_NFS}/clients", json.dumps(nfs_data['clients']))
 
             shares = self.get_shares()
             for share in shares:
@@ -894,6 +945,7 @@ class UNASMonitor:
         used by the headless `--once --json` mode for troubleshooting, tests,
         and external consumers.
         """
+        self._storage = _UNSET
         data: dict = {}
         data["system"] = self.get_system_metrics()
 
