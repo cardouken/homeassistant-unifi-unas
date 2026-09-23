@@ -51,16 +51,9 @@ async def async_create_fix_flow(
     issue_id: str,
     data: dict[str, str] | None,
 ) -> RepairsFlow:
-    """Create the fix flow for a repair issue."""
-    entry_id = (data or {}).get("entry_id", "")
-    if issue_id.startswith("host_key_changed") and entry_id:
-        return HostKeyChangedRepairFlow(entry_id)
-    # Unknown/non-fixable issue: a no-op confirm flow.
-    return _NoopRepairFlow()
+    """Create the fix flow for a repair issue.
 
-
-class _NoopRepairFlow(RepairsFlow):
-    async def async_step_init(
-        self, user_input: dict[str, str] | None = None
-    ) -> data_entry_flow.FlowResult:
-        return self.async_create_entry(title="", data={})
+    host_key_changed is the only fixable issue this integration raises, and
+    it always carries entry_id, so there's nothing else to dispatch on here.
+    """
+    return HostKeyChangedRepairFlow((data or {}).get("entry_id", ""))

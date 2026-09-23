@@ -38,7 +38,7 @@ from .const import (
     get_mqtt_root,
     get_mqtt_topics,
 )
-from .ssh_manager import SSHManager, HostKeyPinError
+from .ssh_manager import SSHManager
 from .mqtt_client import UNASMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -78,6 +78,48 @@ def _version_at_least(stored: str | None, target: str) -> bool:
         return Version(stored.replace("-dev", "")) >= Version(target.replace("-dev", ""))
     except InvalidVersion:
         return stored == target
+
+
+def _host_key_repair_id(entry_id: str) -> str:
+    return f"host_key_changed_{entry_id}"
+
+
+@callback
+def _raise_host_key_repair(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _host_key_repair_id(entry.entry_id),
+        is_fixable=True,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="host_key_changed",
+        translation_placeholders={"host": entry.data[CONF_HOST]},
+        data={"entry_id": entry.entry_id},
+    )
+
+
+def _record_host_key_pin(hass: HomeAssistant, entry: ConfigEntry, manager: SSHManager) -> None:
+    """Trust-on-first-use pin plus clearing the re-pin repair on a verified connection.
+
+    Called after *every* successful connection (initial setup and each
+    coordinator refresh), not just setup: if the NAS is unreachable at HA
+    boot, the coordinator's first successful reconnect still needs to pin
+    the key rather than leaving verification silently unpinned until the
+    next reload.
+    """
+    if (
+        entry.data.get(CONF_VERIFY_HOST_KEY)
+        and not entry.data.get(CONF_HOST_KEY)
+        and manager.server_host_key
+    ):
+        new_data = dict(entry.data)
+        new_data[CONF_HOST_KEY] = manager.server_host_key
+        hass.config_entries.async_update_entry(entry, data=new_data)
+        manager.pinned_host_key = manager.server_host_key
+        _LOGGER.info("Pinned SSH host key for %s", entry.data[CONF_HOST])
+
+    # We connected/verified, so clear any outstanding host-key repair.
+    ir.async_delete_issue(hass, DOMAIN, _host_key_repair_id(entry.entry_id))
 
 
 async def _cleanup_old_mqtt_configs_on_upgrade(
@@ -186,22 +228,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         ssh_connected = True
         _LOGGER.info("SSH connection established to %s", entry.data[CONF_HOST])
 
-        # Trust-on-first-use: when verification is enabled and nothing is pinned
-        # yet, record the key seen on this first connection so later connections
-        # are verified against it.
-        if (
-            entry.data.get(CONF_VERIFY_HOST_KEY)
-            and not entry.data.get(CONF_HOST_KEY)
-            and manager.server_host_key
-        ):
-            new_data = dict(entry.data)
-            new_data[CONF_HOST_KEY] = manager.server_host_key
-            hass.config_entries.async_update_entry(entry, data=new_data)
-            manager.pinned_host_key = manager.server_host_key
-            _LOGGER.info("Pinned SSH host key for %s", entry.data[CONF_HOST])
-
-        # We connected/verified, so clear any outstanding host-key repair.
-        ir.async_delete_issue(hass, DOMAIN, f"host_key_changed_{entry.entry_id}")
+        _record_host_key_pin(hass, entry, manager)
 
         scripts_installed = await manager.scripts_installed()
         if last_deploy_version != current_version or not scripts_installed or is_dev_version:
@@ -211,23 +238,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             new_data[LAST_DEPLOY_VERSION_KEY] = current_version
             hass.config_entries.async_update_entry(entry, data=new_data)
 
-    except (HostKeyPinError, asyncssh.HostKeyNotVerifiable) as err:
+    except asyncssh.HostKeyNotVerifiable as err:
         # The presented key doesn't match the pin (or the pin is unreadable).
         # Raise a repair the user can act on to re-pin, then degrade the same
         # way any other SSH failure does: SSH is only used for script
         # deploys/service status/backups, while all sensor data arrives over
         # MQTT. On an existing install we keep those MQTT sensors running and
         # only block a first-time setup.
-        ir.async_create_issue(
-            hass,
-            DOMAIN,
-            f"host_key_changed_{entry.entry_id}",
-            is_fixable=True,
-            severity=ir.IssueSeverity.ERROR,
-            translation_key="host_key_changed",
-            translation_placeholders={"host": entry.data[CONF_HOST]},
-            data={"entry_id": entry.entry_id},
-        )
+        _raise_host_key_repair(hass, entry)
         if not is_existing_installation:
             raise ConfigEntryError(
                 f"SSH host-key verification failed for {entry.data[CONF_HOST]}: {err}"
@@ -434,6 +452,8 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
             monitor_running = await self.ssh_manager.service_running("unas_monitor")
             fan_control_running = await self.ssh_manager.service_running("fan_control")
 
+            _record_host_key_pin(self.hass, self.entry, self.ssh_manager)
+
             data.update({
                 "scripts_installed": scripts_installed,
                 "ssh_connected": True,
@@ -456,6 +476,21 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
             except Exception as err:
                 _LOGGER.debug("Could not fetch backup tasks: %s", err)
                 data["backup_tasks"] = []
+
+        except asyncssh.HostKeyNotVerifiable as err:
+            # A host-key mismatch (or unreadable pin) after setup. Raise the
+            # re-pin repair immediately rather than waiting for a restart,
+            # and don't count this towards the ssh_unavailable threshold --
+            # it isn't a transient outage, it's an actionable security event
+            # that will recur every refresh until the key is re-pinned.
+            _LOGGER.warning(
+                "SSH host-key verification failed for %s; MQTT sensors "
+                "continue but SSH-backed features are unavailable until "
+                "the key is re-pinned: %s",
+                self.entry.data[CONF_HOST],
+                err,
+            )
+            _raise_host_key_repair(self.hass, self.entry)
 
         except Exception as err:
             _LOGGER.warning("SSH connection temporarily unavailable: %s", err)

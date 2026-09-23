@@ -18,14 +18,6 @@ SCRIPTS_DIR = Path(__file__).parent / "scripts"
 SSH_CONNECT_TIMEOUT = 30
 
 
-class HostKeyPinError(Exception):
-    """Raised when host-key verification is enabled but the stored pin is unusable.
-
-    Kept distinct from asyncssh's own errors so setup can fail closed (rather
-    than silently connecting without verification) and surface a repair.
-    """
-
-
 class SSHManager:
     def __init__(
             self,
@@ -111,20 +103,15 @@ class SSHManager:
     def _resolve_known_hosts(self):
         """Choose the asyncssh known_hosts argument.
 
-        Precedence:
-        1. If verification is enabled and a key has been pinned, verify against
-           just that key. If the stored pin can't be parsed, fail closed by
-           raising HostKeyPinError rather than falling back to no verification.
-        2. Otherwise None -- verification disabled (default behavior), and the
-           permissive first connection that trust-on-first-use captures from.
+        When verification is enabled and a key has been pinned, verify
+        against just that key -- asyncssh itself fails closed with
+        HostKeyNotVerifiable on a mismatch or an unparseable pin, so there's
+        no separate error path to handle here. Otherwise None: verification
+        disabled (default behavior), and the permissive first connection
+        that trust-on-first-use captures from.
         """
         if self.verify_host_key and self.pinned_host_key:
-            try:
-                return asyncssh.import_known_hosts(self.pinned_host_key)
-            except (ValueError, asyncssh.Error) as err:
-                raise HostKeyPinError(
-                    f"Stored SSH host key for {self.host} is unreadable: {err}"
-                ) from err
+            return asyncssh.import_known_hosts(self.pinned_host_key)
         return None
 
     def _capture_server_host_key(self) -> None:
@@ -134,9 +121,17 @@ class SSHManager:
         try:
             key = self._conn.get_server_host_key()
             parts = key.export_public_key().decode().strip().split()
-        except Exception:  # noqa: BLE001 - best-effort capture
+        except Exception as err:  # noqa: BLE001 - best-effort capture
+            _LOGGER.warning(
+                "Could not capture SSH host key for %s for TOFU pinning: %s",
+                self.host,
+                err,
+            )
             return
         if len(parts) < 2:
+            _LOGGER.warning(
+                "Unexpected SSH host key format for %s; not pinning", self.host
+            )
             return
         hostspec = self.host if self.port == 22 else f"[{self.host}]:{self.port}"
         self.server_host_key = f"{hostspec} {parts[0]} {parts[1]}"
