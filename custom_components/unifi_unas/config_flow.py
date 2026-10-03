@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import asyncssh
@@ -44,6 +45,8 @@ from .const import (
     DEVICE_MODELS,
     HA_SSH_KEY_PATHS,
     get_mqtt_topics,
+    LAST_CLEANUP_VERSION_KEY,
+    LAST_DEPLOY_VERSION_KEY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,6 +75,11 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         ),
     }
 )
+
+
+def _with_bookkeeping(old: Mapping[str, Any], new: dict[str, Any]) -> dict[str, Any]:
+    kept = {k: old[k] for k in (LAST_DEPLOY_VERSION_KEY, LAST_CLEANUP_VERSION_KEY) if k in old}
+    return {**kept, **new}
 
 
 class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -111,7 +119,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.hass.config_entries.async_update_entry(
                     entry,
                     title=f"{device_name} ({user_input[CONF_HOST]})",
-                    data=user_input,
+                    data=_with_bookkeeping(entry.data, user_input),
                 )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reconfigure_successful")
@@ -178,7 +186,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.hass.config_entries.async_update_entry(
                     entry,
                     title=f"{device_name} ({merged[CONF_HOST]})",
-                    data=merged,
+                    data=_with_bookkeeping(entry.data, merged),
                 )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reconfigure_successful")

@@ -39,6 +39,8 @@ from .const import (
     get_mqtt_root,
     get_mqtt_topics,
     SSH_STATUS_INTERVAL,
+    LAST_CLEANUP_VERSION_KEY,
+    LAST_DEPLOY_VERSION_KEY,
 )
 from .ssh_manager import SSHManager
 from .mqtt_client import UNASMQTTClient
@@ -55,9 +57,33 @@ PLATFORMS: list[Platform] = [
 ]
 
 SSH_UNAVAILABLE_THRESHOLD = 600
-LAST_CLEANUP_VERSION_KEY = "last_cleanup_version"
-LAST_DEPLOY_VERSION_KEY = "last_deploy_version"
 PERFORM_MQTT_CLEANUP = True
+# entry ids unloaded by a reload (reconfigure, options change, manual reload); the
+# following setup pushes the current config into the on-device scripts. A plain
+# HA restart never unloads entries, so it does not redeploy.
+REDEPLOY_AFTER_RELOAD_KEY = f"{DOMAIN}_redeploy_after_reload"
+
+UNAS_UNINSTALL_COMMANDS = [
+    "systemctl stop unas_monitor || true",
+    "systemctl stop fan_control || true",
+    "systemctl disable unas_monitor || true",
+    "systemctl disable fan_control || true",
+    "rm -f /etc/systemd/system/unas_monitor.service",
+    "rm -f /etc/systemd/system/fan_control.service",
+    "rm -f /root/unas_monitor.py",
+    "rm -f /root/fan_control.sh",
+    "rm -f /tmp/fan_control_last_pwm",
+    "rm -f /tmp/fan_control_state",
+    "rm -f /tmp/unas_hdd_temp",
+    "rm -f /tmp/unas_monitor_interval",
+    "rm -f /var/log/fan_control.log /var/log/fan_control.log.[1-9]",
+    "systemctl daemon-reload",
+    "apt remove mosquitto-clients -y",
+    "pip3 uninstall --break-system-packages paho-mqtt -y || pip3 uninstall paho-mqtt -y",
+    "apt remove python3-pip -y",
+    "echo 2 > /sys/class/hwmon/hwmon0/pwm1_enable || true",
+    "echo 2 > /sys/class/hwmon/hwmon0/pwm2_enable || true",
+]
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -202,8 +228,8 @@ async def _cleanup_old_mqtt_configs_on_upgrade(
     hass.config_entries.async_update_entry(entry, data=new_data)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    manager = SSHManager(
+def _build_ssh_manager(entry: ConfigEntry) -> SSHManager:
+    return SSHManager(
         host=entry.data[CONF_HOST],
         username=entry.data[CONF_USERNAME],
         password=entry.data.get(CONF_PASSWORD),
@@ -216,6 +242,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         verify_host_key=entry.data.get(CONF_VERIFY_HOST_KEY, False),
         pinned_host_key=entry.data.get(CONF_HOST_KEY),
     )
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    manager = _build_ssh_manager(entry)
+    redeploy_requested = entry.entry_id in hass.data.get(REDEPLOY_AFTER_RELOAD_KEY, set())
+    hass.data.get(REDEPLOY_AFTER_RELOAD_KEY, set()).discard(entry.entry_id)
 
     integration = await async_get_integration(hass, DOMAIN)
     current_version = str(integration.version)
@@ -233,7 +265,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _record_host_key_pin(hass, entry, manager)
 
         scripts_installed = await manager.scripts_installed()
-        if last_deploy_version != current_version or not scripts_installed or is_dev_version:
+        if (
+            last_deploy_version != current_version
+            or not scripts_installed
+            or is_dev_version
+            or redeploy_requested
+        ):
             mqtt_root = get_mqtt_topics(entry.entry_id)["root"]
             await manager.deploy_scripts(device_model, mqtt_root)
             new_data = dict(entry.data)
@@ -271,14 +308,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     pending_script_deploy = not ssh_connected and (
-        last_deploy_version != current_version or is_dev_version
+        last_deploy_version != current_version or is_dev_version or redeploy_requested
     )
 
     mqtt_client_instance = UNASMQTTClient(hass, entry.entry_id)
     coordinator = UNASDataUpdateCoordinator(hass, manager, mqtt_client_instance, entry, pending_script_deploy)
     mqtt_client_instance._coordinator = coordinator
 
-    await coordinator.async_config_entry_first_refresh()
+    try:
+        await coordinator.async_config_entry_first_refresh()
+    except Exception:
+        await manager.disconnect()
+        raise
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
@@ -330,37 +371,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         data = hass.data[DOMAIN].pop(entry.entry_id)
         await data["mqtt_client"].async_unsubscribe()
-        await _clear_retained_mqtt_topics(hass, entry.entry_id)
-
-        manager = data["ssh_manager"]
-        try:
-            await manager.execute_command("systemctl stop unas_monitor || true")
-            await manager.execute_command("systemctl stop fan_control || true")
-            await manager.execute_command("systemctl disable unas_monitor || true")
-            await manager.execute_command("systemctl disable fan_control || true")
-            await manager.execute_command("rm -f /etc/systemd/system/unas_monitor.service")
-            await manager.execute_command("rm -f /etc/systemd/system/fan_control.service")
-            await manager.execute_command("rm -f /root/unas_monitor.py")
-            await manager.execute_command("rm -f /root/fan_control.sh")
-            await manager.execute_command("rm -f /tmp/fan_control_last_pwm")
-            await manager.execute_command("rm -f /tmp/fan_control_state")
-            await manager.execute_command("rm -f /tmp/unas_hdd_temp")
-            await manager.execute_command("rm -f /tmp/unas_monitor_interval")
-            await manager.execute_command("rm -f /var/log/fan_control.log /var/log/fan_control.log.[1-9]")
-            await manager.execute_command("systemctl daemon-reload")
-            await manager.execute_command("apt remove mosquitto-clients -y")
-            await manager.execute_command(
-                "pip3 uninstall --break-system-packages paho-mqtt -y || pip3 uninstall paho-mqtt -y"
-            )
-            await manager.execute_command("apt remove python3-pip -y")
-            await manager.execute_command("echo 2 > /sys/class/hwmon/hwmon0/pwm1_enable || true")
-            await manager.execute_command("echo 2 > /sys/class/hwmon/hwmon0/pwm2_enable || true")
-        except Exception as err:
-            _LOGGER.error("Failed to clean up UNAS (non-critical): %s", err)
-
-        await manager.disconnect()
+        await data["ssh_manager"].disconnect()
+        hass.data.setdefault(REDEPLOY_AFTER_RELOAD_KEY, set()).add(entry.entry_id)
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    hass.data.get(REDEPLOY_AFTER_RELOAD_KEY, set()).discard(entry.entry_id)
+    await _clear_retained_mqtt_topics(hass, entry.entry_id)
+
+    manager = _build_ssh_manager(entry)
+    try:
+        for command in UNAS_UNINSTALL_COMMANDS:
+            await manager.execute_command(command)
+        _LOGGER.info("Removed monitor and fan control from UNAS at %s", entry.data[CONF_HOST])
+    except Exception as err:
+        _LOGGER.error("Failed to clean up UNAS (non-critical): %s", err)
+    finally:
+        await manager.disconnect()
 
 
 class UNASDataUpdateCoordinator(DataUpdateCoordinator):
