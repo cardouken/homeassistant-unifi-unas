@@ -37,6 +37,7 @@ from .const import (
     CONF_MQTT_PORT,
     CONF_MQTT_TLS,
     CONF_MQTT_TLS_INSECURE,
+    CONF_VERIFY_HOST_KEY,
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
     CONF_DEVICE_NAME,
@@ -63,6 +64,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
             )
         ),
         vol.Optional(CONF_DEVICE_NAME, default="UNAS"): str,
+        vol.Optional(CONF_VERIFY_HOST_KEY, default=False): BooleanSelector(),
         vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): NumberSelector(
             NumberSelectorConfig(
                 min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX
@@ -133,6 +135,10 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_DEVICE_NAME,
                     default=entry.data.get(CONF_DEVICE_NAME) or "UNAS",
                 ): str,
+                vol.Optional(
+                    CONF_VERIFY_HOST_KEY,
+                    default=entry.data.get(CONF_VERIFY_HOST_KEY, False),
+                ): BooleanSelector(),
                 vol.Optional(CONF_SCAN_INTERVAL,
                              default=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): NumberSelector(
                     NumberSelectorConfig(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX)

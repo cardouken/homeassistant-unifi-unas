@@ -45,6 +45,8 @@ class SSHManager:
             mqtt_port: int = 1883,
             mqtt_tls: bool = False,
             mqtt_tls_insecure: bool = False,
+            verify_host_key: bool = False,
+            pinned_host_key: Optional[str] = None,
     ) -> None:
         self.host = host
         self.username = username
@@ -57,6 +59,11 @@ class SSHManager:
         self.mqtt_port = mqtt_port
         self.mqtt_tls = mqtt_tls
         self.mqtt_tls_insecure = mqtt_tls_insecure
+        self.verify_host_key = verify_host_key
+        self.pinned_host_key = pinned_host_key
+        # Populated on connect with the server's host key in known_hosts form
+        # ("host keytype base64"), for trust-on-first-use pinning by the caller.
+        self.server_host_key: Optional[str] = None
         self._conn: Optional[asyncssh.SSHClientConnection] = None
         self._lock = asyncio.Lock()
 
@@ -90,6 +97,8 @@ class SSHManager:
                         _LOGGER.debug("Using SSH key from %s", key_path)
                         break
 
+            known_hosts = self._resolve_known_hosts()
+
             self._conn = await asyncio.wait_for(
                 asyncssh.connect(
                     self.host,
@@ -97,11 +106,48 @@ class SSHManager:
                     username=self.username,
                     password=self.password if self.password else None,
                     client_keys=client_keys,
-                    known_hosts=None,
+                    known_hosts=known_hosts,
                 ),
                 timeout=SSH_CONNECT_TIMEOUT,
             )
+            self._capture_server_host_key()
             _LOGGER.debug("SSH connection established")
+
+    def _resolve_known_hosts(self):
+        """Choose the asyncssh known_hosts argument.
+
+        When verification is enabled and a key has been pinned, verify
+        against just that key -- asyncssh itself fails closed with
+        HostKeyNotVerifiable on a mismatch or an unparseable pin, so there's
+        no separate error path to handle here. Otherwise None: verification
+        disabled (default behavior), and the permissive first connection
+        that trust-on-first-use captures from.
+        """
+        if self.verify_host_key and self.pinned_host_key:
+            return asyncssh.import_known_hosts(self.pinned_host_key)
+        return None
+
+    def _capture_server_host_key(self) -> None:
+        """Record the server's host key in known_hosts form for TOFU pinning."""
+        if self._conn is None:
+            return
+        try:
+            key = self._conn.get_server_host_key()
+            parts = key.export_public_key().decode().strip().split()
+        except Exception as err:  # noqa: BLE001 - best-effort capture
+            _LOGGER.warning(
+                "Could not capture SSH host key for %s for TOFU pinning: %s",
+                self.host,
+                err,
+            )
+            return
+        if len(parts) < 2:
+            _LOGGER.warning(
+                "Unexpected SSH host key format for %s; not pinning", self.host
+            )
+            return
+        hostspec = self.host if self.port == 22 else f"[{self.host}]:{self.port}"
+        self.server_host_key = f"{hostspec} {parts[0]} {parts[1]}"
 
     async def disconnect(self) -> None:
         async with self._lock:
