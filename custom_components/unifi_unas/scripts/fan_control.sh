@@ -44,7 +44,6 @@ MQTT_CONTROL="${MQTT_ROOT}/control"
 MQTT_FAN="${MQTT_CONTROL}/fan"
 
 STATE_FILE="/tmp/fan_control_state"
-LAST_PWM_FILE="/tmp/fan_control_last_pwm"
 SHARED_TEMP_FILE="/tmp/unas_hdd_temp"
 MONITOR_INTERVAL_FILE="/tmp/unas_monitor_interval"
 LOG_FILE="/var/log/fan_control.log"
@@ -104,7 +103,8 @@ log() {
     local timestamp msg
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     msg="[$timestamp] $*"
-    echo "$msg"
+    # stderr, not stdout: log() is called inside $(...) captures that carry temperature data
+    echo "$msg" >&2
     echo "$msg" >> "$LOG_FILE"
 }
 
@@ -152,6 +152,11 @@ done
 
 set_pwm() {
     local ch
+    # the hwmon driver clamps out of range values instead of rejecting them, so a negative value would stop the fans
+    if ! is_integer "$1" || [ "$1" -gt 255 ]; then
+        log "WARNING: refusing to write invalid PWM value '$1'"
+        return 0
+    fi
     for ch in "${PWM_CHANNELS[@]:-}"; do
         [ -n "$ch" ] && echo "$1" > "$ch"
     done
@@ -165,40 +170,43 @@ update_state_from_mqtt() {
     local topic=$1 payload=$2
     local var_name
 
+    # every payload is validated before it reaches the state file, which is sourced as root.
+    # return 0 on rejects: a non-zero return under set -e kills the subscriber loop
     case "${topic##*/}" in
         mode)
+            [[ "$payload" =~ ^(unas_managed|auto|target_temp|[0-9]{1,3})$ ]] || return 0
             var_name="FAN_MODE"
             ;;
         min_temp)
-            is_integer "$payload" || return
+            is_integer "$payload" || return 0
             var_name="MIN_TEMP"
             ;;
         max_temp)
-            is_integer "$payload" || return
+            is_integer "$payload" || return 0
             var_name="MAX_TEMP"
             ;;
         min_fan)
-            is_integer "$payload" || return
+            is_integer "$payload" || return 0
             var_name="MIN_FAN"
             ;;
         max_fan)
-            is_integer "$payload" || return
+            is_integer "$payload" || return 0
             var_name="MAX_FAN"
             ;;
         target_temp)
-            is_integer "$payload" || return
+            is_integer "$payload" || return 0
             var_name="TARGET_TEMP"
             ;;
         temp_metric)
-            [[ "$payload" =~ ^(max|avg)$ ]] || return
+            [[ "$payload" =~ ^(max|avg)$ ]] || return 0
             var_name="TEMP_METRIC"
             ;;
         response_speed)
-            [[ "$payload" =~ ^(relaxed|balanced|aggressive)$ ]] || return
+            [[ "$payload" =~ ^(relaxed|balanced|aggressive)$ ]] || return 0
             var_name="RESPONSE_SPEED"
             ;;
         *)
-            return
+            return 0
             ;;
     esac
 
@@ -208,18 +216,6 @@ update_state_from_mqtt() {
         flock -x 200
         sed -i "s/^${var_name}=.*/${var_name}=${escaped_payload}/" "$STATE_FILE"
     } 200>"${STATE_FILE}.lock"
-}
-
-publish_if_changed() {
-    local new_pwm=$1
-    local last_pwm
-    last_pwm=$(cat "$LAST_PWM_FILE" 2>/dev/null || echo "0")
-
-    if [ "$new_pwm" != "$last_pwm" ]; then
-        mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS \
-            -t "${MQTT_SYSTEM}/fan_speed" -m "$new_pwm" 2>/dev/null || true
-        echo "$new_pwm" > "$LAST_PWM_FILE"
-    fi
 }
 
 cleanup() {
@@ -283,7 +279,7 @@ get_temp_for_metric() {
     local first_temp="${temps%% *}"
 
     if [ "$TEMP_METRIC" = "avg" ]; then
-        echo "$temps" | awk '{sum=0; for(i=1;i<=NF;i++) sum+=$i; printf "%.1f", sum/NF}'
+        echo "$temps" | awk '{sum=0; for(i=1;i<=NF;i++) sum+=$i; if (NF) printf "%.1f", sum/NF}'
     else
         echo "$first_temp"
     fi
@@ -511,7 +507,7 @@ handle_mode_unas_managed() {
     file_age="${temp_info##*:}"
     max_temp="${temps%% *}"
 
-    avg_temp=$(echo "$temps" | awk '{sum=0; for(i=1;i<=NF;i++) sum+=$i; printf "%.1f", sum/NF}')
+    avg_temp=$(echo "$temps" | awk '{sum=0; for(i=1;i<=NF;i++) sum+=$i; if (NF) printf "%.1f", sum/NF}')
     drive_count=$(echo "$temps" | wc -w)
 
     FAN_PWM_RESULT=$(cat /sys/class/hwmon/hwmon0/pwm1 2>/dev/null || echo 0)
@@ -525,6 +521,13 @@ handle_mode_custom_curve() {
     temps="${temp_info%%:*}"
     temp="${temps%% *}"
     file_age="${temp_info##*:}"
+
+    if ! is_integer "$temp"; then
+        FAN_PWM_RESULT=$MAX_FAN
+        set_pwm "$FAN_PWM_RESULT"
+        log "CUSTOM CURVE MODE: No drive temperatures, using max fan ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+        return
+    fi
 
     FAN_PWM_RESULT=$(calculate_pwm "$temp" "$MIN_TEMP" "$MAX_TEMP" "$MIN_FAN" "$MAX_FAN")
     set_pwm "$FAN_PWM_RESULT"
@@ -551,10 +554,10 @@ handle_mode_target_temp() {
     metric_label="max"
     [ "$TEMP_METRIC" = "avg" ] && metric_label="avg"
 
-    if [ "$temp_int" -eq 0 ]; then
-        FAN_PWM_RESULT=$MIN_FAN
+    if ! is_integer "$temp_int" || [ "$temp_int" -eq 0 ]; then
+        FAN_PWM_RESULT=$MAX_FAN
         set_pwm "$FAN_PWM_RESULT"
-        log "TARGET TEMP MODE [$RESPONSE_SPEED]: No drives detected, using min fan ($(pwm_to_percent "$FAN_PWM_RESULT"))"
+        log "TARGET TEMP MODE [$RESPONSE_SPEED]: No drive temperatures, using max fan ($(pwm_to_percent "$FAN_PWM_RESULT"))"
         return
     fi
 
@@ -635,8 +638,6 @@ set_fan_speed() {
             fi
             ;;
     esac
-
-    publish_if_changed "$FAN_PWM_RESULT"
 }
 
 # =============================================================================
@@ -654,8 +655,6 @@ set_fan_speed() {
     echo "TEMP_METRIC=$TEMP_METRIC"
     echo "RESPONSE_SPEED=$RESPONSE_SPEED"
 } > "$STATE_FILE"
-
-echo "0" > "$LAST_PWM_FILE"
 
 SERVICE=false
 [ "${1:-}" = "--service" ] && SERVICE=true
@@ -695,21 +694,21 @@ log "$(cat "$STATE_FILE")"
 # correct initial values (especially after integration removal cleared topics)
 # shellcheck source=/dev/null
 source "$STATE_FILE"
-mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
+timeout 5 mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
     -t "${MQTT_FAN}/mode" -m "$FAN_MODE" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
+timeout 5 mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
     -t "${MQTT_FAN}/curve/min_temp" -m "$MIN_TEMP" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
+timeout 5 mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
     -t "${MQTT_FAN}/curve/max_temp" -m "$MAX_TEMP" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
+timeout 5 mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
     -t "${MQTT_FAN}/curve/min_fan" -m "$MIN_FAN" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
+timeout 5 mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
     -t "${MQTT_FAN}/curve/max_fan" -m "$MAX_FAN" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
+timeout 5 mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
     -t "${MQTT_FAN}/curve/target_temp" -m "$TARGET_TEMP" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
+timeout 5 mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
     -t "${MQTT_FAN}/curve/temp_metric" -m "$TEMP_METRIC" 2>/dev/null || true
-mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
+timeout 5 mosquitto_pub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $MQTT_TLS_OPTS -r \
     -t "${MQTT_FAN}/curve/response_speed" -m "$RESPONSE_SPEED" 2>/dev/null || true
 log "Published initial state to MQTT"
 
@@ -722,7 +721,8 @@ mosquitto_sub -h "$MQTT_HOST" -p "$MQTT_PORT" -u "$MQTT_USER" -P "$MQTT_PASS" $M
 done &
 MQTT_PID=$!
 
-trap cleanup EXIT TERM INT
+trap cleanup EXIT
+trap 'exit 0' TERM INT
 
 # =============================================================================
 # Main loop
@@ -730,6 +730,10 @@ trap cleanup EXIT TERM INT
 
 if $SERVICE; then
     while true; do
+        if ! kill -0 "$MQTT_PID" 2>/dev/null; then
+            log "ERROR: MQTT subscriber exited, restarting"
+            exit 1
+        fi
         set_fan_speed
         sleep 1
     done

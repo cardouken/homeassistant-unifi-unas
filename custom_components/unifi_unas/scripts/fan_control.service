@@ -6,7 +6,8 @@ Wants=network-online.target
 [Service]
 ExecStart=/root/fan_control.sh --service
 Restart=always
-RestartSec=30
+RestartSec=5
+TimeoutStopSec=5
 User=root
 
 [Install]
