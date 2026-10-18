@@ -1,13 +1,14 @@
 [Unit]
 Description=Fan Control Based on Temperatures
-After=network-online.target unas_monitor.service
+After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/root/fan_control.sh --service
+ExecStart=/usr/bin/python3 /root/fan_control.py
+ExecStopPost=/usr/bin/python3 /root/fan_control.py --handback
 Restart=always
 RestartSec=5
-TimeoutStopSec=5
+TimeoutStopSec=10
 User=root
 
 [Install]

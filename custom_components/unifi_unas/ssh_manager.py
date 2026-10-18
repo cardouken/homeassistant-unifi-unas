@@ -28,6 +28,11 @@ BULLSEYE_APT_FALLBACK = (
     "python3-pip=20.3.4-4+deb11u1 python-pip-whl=20.3.4-4+deb11u1 "
     "python3-setuptools=52.0.0-4 python3-pkg-resources=52.0.0-4"
 )
+# left behind by the bash fan controller shipped up to 0.9.x
+LEGACY_FAN_CLEANUP = (
+    "rm -f /root/fan_control.sh /tmp/fan_control_state /tmp/fan_control_state.lock "
+    "/tmp/fan_control_last_pwm /var/log/fan_control.log /var/log/fan_control.log.[1-9]"
+)
 APT_TOOLS_PROBE = "which mosquitto_sub >/dev/null 2>&1 && which pip3 >/dev/null 2>&1 && echo ok"
 
 
@@ -166,7 +171,7 @@ class SSHManager:
 
     async def scripts_installed(self) -> bool:
         stdout, _ = await self.execute_command(
-            "test -f /root/unas_monitor.py && test -f /root/fan_control.sh "
+            "test -f /root/unas_monitor.py && test -f /root/fan_control.py "
             f"&& {PAHO_PROBE} 2>/dev/null "
             "&& which mosquitto_sub >/dev/null 2>&1 "
             "&& echo 'yes' || echo 'no'"
@@ -220,11 +225,9 @@ class SSHManager:
         }
 
         for key, value in replacements.items():
-            # unas_monitor.py — escape for Python string literal
+            # escape for a Python string literal
             escaped = value.replace("\\", "\\\\").replace('"', '\\"')
             script = script.replace(f'{key} = "REPLACE_ME"', f'{key} = "{escaped}"')
-            # fan_control.sh
-            script = script.replace(f'{key}="REPLACE_ME"', f'{key}={shlex.quote(value)}')
 
         return script
 
@@ -237,7 +240,7 @@ class SSHManager:
                 monitor_script = await f.read()
             async with aiofiles.open(SCRIPTS_DIR / "unas_monitor.service", "r") as f:
                 monitor_service = await f.read()
-            async with aiofiles.open(SCRIPTS_DIR / "fan_control.sh", "r") as f:
+            async with aiofiles.open(SCRIPTS_DIR / "fan_control.py", "r") as f:
                 fan_control_script = await f.read()
             async with aiofiles.open(SCRIPTS_DIR / "fan_control.service", "r") as f:
                 fan_control_service = await f.read()
@@ -253,7 +256,7 @@ class SSHManager:
 
             await self._upload_file("/root/unas_monitor.py", monitor_script, executable=True)
             await self._upload_file("/etc/systemd/system/unas_monitor.service", monitor_service)
-            await self._upload_file("/root/fan_control.sh", fan_control_script, executable=True)
+            await self._upload_file("/root/fan_control.py", fan_control_script, executable=True)
             await self._upload_file("/etc/systemd/system/fan_control.service", fan_control_service)
 
             await self.execute_command("apt-get update")
@@ -284,6 +287,7 @@ class SSHManager:
             await self.execute_command("systemctl restart unas_monitor")
             await self.execute_command("systemctl enable fan_control")
             await self.execute_command("systemctl restart fan_control")
+            await self.execute_command(LEGACY_FAN_CLEANUP)
 
             _LOGGER.info("Scripts deployed and services started")
 

@@ -1,0 +1,17 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  scripts:
+    runs-on: "ubuntu-latest"
+    strategy:
+      matrix:
+        python: ["3.9", "3.13"]
+    steps:
+      - uses: "actions/checkout@v4"
+      - uses: "astral-sh/setup-uv@v6"
+      - name: On-device scripts
+        run: uv run --no-project --python ${{ matrix.python }} --with pytest pytest -q tests/scripts

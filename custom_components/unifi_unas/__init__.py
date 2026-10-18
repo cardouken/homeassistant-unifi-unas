@@ -71,6 +71,7 @@ UNAS_UNINSTALL_COMMANDS = [
     "rm -f /etc/systemd/system/unas_monitor.service",
     "rm -f /etc/systemd/system/fan_control.service",
     "rm -f /root/unas_monitor.py",
+    "rm -f /root/fan_control.py /root/fan_control.json /root/fan_control.tmp",
     "rm -f /root/fan_control.sh",
     "rm -f /tmp/fan_control_last_pwm",
     "rm -f /tmp/fan_control_state",
