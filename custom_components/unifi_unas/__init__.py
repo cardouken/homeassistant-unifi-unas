@@ -42,7 +42,7 @@ from .const import (
     LAST_CLEANUP_VERSION_KEY,
     LAST_DEPLOY_VERSION_KEY,
 )
-from .ssh_manager import SSHManager
+from .ssh_manager import BUNDLE_DIR, LEGACY_CLEANUP, SSHManager
 from .mqtt_client import UNASMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,18 +70,9 @@ UNAS_UNINSTALL_COMMANDS = [
     "systemctl disable fan_control || true",
     "rm -f /etc/systemd/system/unas_monitor.service",
     "rm -f /etc/systemd/system/fan_control.service",
-    "rm -f /root/unas_monitor.py",
-    "rm -f /root/fan_control.py /root/fan_control.json /root/fan_control.tmp",
-    "rm -f /root/fan_control.sh",
-    "rm -f /tmp/fan_control_last_pwm",
-    "rm -f /tmp/fan_control_state",
-    "rm -f /tmp/unas_hdd_temp",
-    "rm -f /tmp/unas_monitor_interval",
-    "rm -f /var/log/fan_control.log /var/log/fan_control.log.[1-9]",
+    f"rm -rf {BUNDLE_DIR}",
+    LEGACY_CLEANUP,
     "systemctl daemon-reload",
-    "apt remove mosquitto-clients -y",
-    "pip3 uninstall --break-system-packages paho-mqtt -y || pip3 uninstall paho-mqtt -y",
-    "apt remove python3-pip -y",
     "echo 2 > /sys/class/hwmon/hwmon0/pwm1_enable || true",
     "echo 2 > /sys/class/hwmon/hwmon0/pwm2_enable || true",
 ]
@@ -265,14 +256,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         _record_host_key_pin(hass, entry, manager)
 
-        scripts_installed = await manager.scripts_installed()
+        mqtt_root = get_mqtt_topics(entry.entry_id)["root"]
+        scripts_installed = await manager.scripts_installed(device_model, mqtt_root)
         if (
             last_deploy_version != current_version
             or not scripts_installed
             or is_dev_version
             or redeploy_requested
         ):
-            mqtt_root = get_mqtt_topics(entry.entry_id)["root"]
             await manager.deploy_scripts(device_model, mqtt_root)
             new_data = dict(entry.data)
             new_data[LAST_DEPLOY_VERSION_KEY] = current_version
@@ -521,13 +512,13 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
 
     async def _async_update_ssh_status(self, data: dict[str, Any]) -> None:
         try:
-            scripts_installed = await self.ssh_manager.scripts_installed()
+            device_model = self.entry.data[CONF_DEVICE_MODEL]
+            mqtt_root = get_mqtt_topics(self.entry.entry_id)["root"]
+            scripts_installed = await self.ssh_manager.scripts_installed(device_model, mqtt_root)
 
             if not scripts_installed or self.pending_script_deploy:
-                reason = "missing" if not scripts_installed else "pending upgrade"
+                reason = "missing or outdated" if not scripts_installed else "pending upgrade"
                 _LOGGER.info("Scripts %s, deploying...", reason)
-                device_model = self.entry.data[CONF_DEVICE_MODEL]
-                mqtt_root = get_mqtt_topics(self.entry.entry_id)["root"]
                 await self.ssh_manager.deploy_scripts(device_model, mqtt_root)
                 self.pending_script_deploy = False
                 integration = await async_get_integration(self.hass, DOMAIN)

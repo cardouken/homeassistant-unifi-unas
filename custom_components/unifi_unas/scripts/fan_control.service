@@ -4,8 +4,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/python3 /root/fan_control.py
-ExecStopPost=/usr/bin/python3 /root/fan_control.py --handback
+ExecStart=/usr/bin/python3 /root/unifi_unas/fan_control.py
+ExecStopPost=/usr/bin/python3 /root/unifi_unas/fan_control.py --handback
 Restart=always
 RestartSec=5
 TimeoutStopSec=10

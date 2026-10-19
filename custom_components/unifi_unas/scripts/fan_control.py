@@ -12,6 +12,8 @@ import threading
 import time
 from pathlib import Path
 
+from unas_common import BUNDLE_DIR, connect, load_config, mqtt_client
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(message)s',
@@ -19,30 +21,23 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MQTT_HOST = "REPLACE_ME"
-MQTT_USER = "REPLACE_ME"
-MQTT_PASS = "REPLACE_ME"
-MQTT_ROOT = "REPLACE_ME"
-MQTT_PORT = "REPLACE_ME"
-MQTT_TLS = "REPLACE_ME"
-MQTT_TLS_INSECURE = "REPLACE_ME"
-
+CONFIG = load_config()
+MQTT_ROOT = CONFIG.get("root", "unas")
 MQTT_CONTROL = f"{MQTT_ROOT}/control"
 MQTT_FAN_CONTROL = f"{MQTT_CONTROL}/fan"
 MQTT_MONITOR_INTERVAL = f"{MQTT_CONTROL}/monitor_interval"
 MQTT_FAN_AVAILABILITY = f"{MQTT_ROOT}/fan/availability"
 MQTT_FAN_STATE = f"{MQTT_ROOT}/fan/state"
 
-SETTINGS_FILE = Path("/root/fan_control.json")
+SETTINGS_FILE = BUNDLE_DIR / "fan_settings.json"
 HWMON = Path("/sys/class/hwmon/hwmon0")
 
-# PI controller, identical to the bash controller it replaces
 KP = 10
 KI = 0.05
 MAX_RATE = 5
 RESTORE_WINDOW = 300
 INTEGRAL_REDUCE_FACTOR = 0.25
-# the bash controller effectively kept 7 samples (its 6 plus an off-by-one), keep that window
+# the bash controller kept 7 samples in practice (off-by-one)
 TREND_HISTORY_SIZE = 7
 TREND_FALLING_FAST = -1.5
 TREND_FALLING = 0
@@ -418,8 +413,6 @@ def hand_back():
 
 class FanService:
     def __init__(self):
-        import paho.mqtt.client as mqtt  # type: ignore  # installed on UNAS, not HA
-
         self.settings = load_settings()
         self.received = set()
         self.lock = threading.Lock()
@@ -440,16 +433,7 @@ class FanService:
         self.last_log_at = 0
         self.rejected = set()
 
-        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-        self.client.username_pw_set(MQTT_USER, MQTT_PASS)
-        if MQTT_TLS == "true":
-            import ssl
-            if MQTT_TLS_INSECURE == "true":
-                self.client.tls_set(cert_reqs=ssl.CERT_NONE)
-                self.client.tls_insecure_set(True)
-            else:
-                self.client.tls_set()
-        self.client.will_set(MQTT_FAN_AVAILABILITY, "offline", retain=True)
+        self.client = mqtt_client(CONFIG, MQTT_FAN_AVAILABILITY)
         self.client.on_connect = self._on_connect
         self.client.on_subscribe = self._on_subscribe
         self.client.on_message = self._on_message
@@ -569,7 +553,7 @@ class FanService:
         signal.signal(signal.SIGINT, lambda *_: self.stop.set())
         logger.info("Fan control starting, PWM channels: %s", ", ".join(c.name for c in self.channels) or "none")
         self.client.loop_start()
-        self.client.connect_async(MQTT_HOST, int(MQTT_PORT), 60)
+        connect(self.client, CONFIG)
         self._wait_for_retained()
 
         while not self.stop.is_set():

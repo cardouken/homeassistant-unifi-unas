@@ -15,3 +15,14 @@ jobs:
       - uses: "astral-sh/setup-uv@v6"
       - name: On-device scripts
         run: uv run --no-project --python ${{ matrix.python }} --with pytest pytest -q tests/scripts
+
+  integration:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: "actions/checkout@v4"
+      - uses: "astral-sh/setup-uv@v6"
+      - name: Integration
+        run: >-
+          uv run --no-project --python 3.14
+          --with homeassistant==2026.10.2 --with asyncssh --with paho-mqtt==2.1.0 --with pytest
+          pytest -q tests --ignore=tests/scripts

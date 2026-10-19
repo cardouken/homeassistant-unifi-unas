@@ -4,11 +4,11 @@ import time
 import subprocess
 import logging
 import json
-import fcntl
 import http.client
 import re
 from pathlib import Path
-import paho.mqtt.client as mqtt  # type: ignore  # installed on UNAS, not HA
+
+from unas_common import connect, load_config, mqtt_client
 
 logging.basicConfig(
     level=logging.INFO,
@@ -17,13 +17,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-MQTT_HOST = "REPLACE_ME"
-MQTT_USER = "REPLACE_ME"
-MQTT_PASS = "REPLACE_ME"
-MQTT_ROOT = "REPLACE_ME"
-MQTT_PORT = "REPLACE_ME"
-MQTT_TLS = "REPLACE_ME"
-MQTT_TLS_INSECURE = "REPLACE_ME"
+CONFIG = load_config()
+MQTT_ROOT = CONFIG.get("root", "unas")
 DEFAULT_MONITOR_INTERVAL = 30
 MQTT_AVAILABILITY = f"{MQTT_ROOT}/availability"
 MQTT_SYSTEM = f"{MQTT_ROOT}/system"
@@ -35,15 +30,13 @@ MQTT_NFS = f"{MQTT_ROOT}/nfs"
 MQTT_SHARE = f"{MQTT_ROOT}/share"
 MQTT_CONTROL = f"{MQTT_ROOT}/control"
 MONITOR_INTERVAL_TOPIC = f"{MQTT_CONTROL}/monitor_interval"
-SHARED_TEMP_FILE = "/tmp/unas_hdd_temp"
-MONITOR_INTERVAL_FILE = "/tmp/unas_monitor_interval"
 # HA drops MQTT keys it has not seen for 120s, so unchanged values are
 # re-asserted at least this often; changed values publish immediately.
 REPUBLISH_INTERVAL = 60
 SHARE_CACHE_TTL = 300
 _UNSET = object()
 
-DEVICE_MODEL = "UNAS_PRO"
+DEVICE_MODEL = CONFIG.get("device_model", "UNAS_PRO")
 
 BAY_MAPPINGS = {
     "UNAS_PRO": {
@@ -122,25 +115,12 @@ class UNASMonitor:
         self._share_members_cache = {}  # drive_id -> (ts, member_count, members)
 
         if mqtt_enabled:
-            self.mqtt = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
-            self.mqtt.username_pw_set(MQTT_USER, MQTT_PASS)
-            if MQTT_TLS == "true":
-                import ssl
-                if MQTT_TLS_INSECURE == "true":
-                    self.mqtt.tls_set(cert_reqs=ssl.CERT_NONE)
-                    self.mqtt.tls_insecure_set(True)
-                else:
-                    self.mqtt.tls_set()
+            self.mqtt = mqtt_client(CONFIG, MQTT_AVAILABILITY)
             self.mqtt.on_connect = self._on_connect
             self.mqtt.on_disconnect = self._on_disconnect
             self.mqtt.on_message = self._on_message
-
-            self.mqtt.will_set(MQTT_AVAILABILITY, "offline", retain=True)
             self.mqtt.loop_start()
-            try:
-                self.mqtt.connect(MQTT_HOST, int(MQTT_PORT), 60)
-            except Exception as e:
-                logger.warning(f"Initial MQTT connect failed (will retry): {e}")
+            connect(self.mqtt, CONFIG)
 
             for _ in range(30):
                 if self._connected:
@@ -193,12 +173,6 @@ class UNASMonitor:
                     old = self.monitor_interval
                     self.monitor_interval = new_interval
                     logger.info(f"Monitor interval: {old}s -> {new_interval}s")
-                    # write interval to shared file for fan control script
-                    try:
-                        with open(MONITOR_INTERVAL_FILE, 'w') as f:
-                            f.write(str(new_interval))
-                    except OSError:
-                        pass
             except (ValueError, TypeError):
                 pass
 
@@ -422,17 +396,6 @@ class UNASMonitor:
             return result.stdout
         except (subprocess.SubprocessError, OSError):
             return ""
-
-    def write_hdd_temps(self, temps):
-        try:
-            temp_str = ' '.join(str(t) for t in sorted(temps, reverse=True))
-            with open(f"{SHARED_TEMP_FILE}.tmp", 'w') as f:
-                fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-                f.write(temp_str)
-                f.flush()
-            Path(f"{SHARED_TEMP_FILE}.tmp").rename(SHARED_TEMP_FILE)
-        except OSError as e:
-            logger.warning(f"Failed to write temp file: {e}")
 
     def get_system_metrics(self):
         data = {}
@@ -702,11 +665,6 @@ class UNASMonitor:
                 del self.drive_removed_at[serial]
 
         self.previous_drive_map = current_drive_map
-        drive_temps = [d['temperature'] for d in drives if d.get('temperature', 0) > 0]
-        # Only maintain the shared temp file (read by the fan-control daemon)
-        # when running as the live service, not during a one-shot collection.
-        if self.mqtt_enabled:
-            self.write_hdd_temps(drive_temps if drive_temps else [0])
         return drives
 
     def get_nvme_drives(self):
@@ -994,13 +952,6 @@ class UNASMonitor:
 
     def run(self):
         logger.info(f"UNAS monitor started (interval: {self.monitor_interval}s)")
-        
-        # write initial interval to shared file for fan control script
-        try:
-            with open(MONITOR_INTERVAL_FILE, 'w') as f:
-                f.write(str(self.monitor_interval))
-        except OSError:
-            pass
 
         while True:
             try:

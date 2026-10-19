@@ -145,3 +145,13 @@ def test_settings_file_ignores_invalid_values(tmp_path, monkeypatch):
     assert settings["mode"] == "unas_managed"
     assert settings["min_fan"] == 51
     assert settings["max_fan"] == 255
+
+
+def test_data_version_keeps_counting_when_the_interval_grows():
+    service = fc.FanService()
+    service.monitor_interval = 5
+    versions = [service._data_version(now) for now in range(1000, 1011)]
+    assert versions == [1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3]
+    service.monitor_interval = 30
+    assert service._data_version(1020) == 3
+    assert service._data_version(1040) == 4

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
+import posixpath
 import shlex
 from pathlib import Path
 from typing import Optional
 
-import aiofiles
 import asyncssh
 
 from .const import HA_SSH_KEY_PATHS
@@ -16,24 +17,28 @@ _LOGGER = logging.getLogger(__name__)
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
 SSH_CONNECT_TIMEOUT = 30
-# check for paho 2.x specifically, some firmware builds ship the 1.5.1 apt package (#43)
-PAHO_PROBE = "python3 -c 'import paho.mqtt.client as m; m.CallbackAPIVersion'"
-
-# TODO: remove all of the below at some point once we deem UniFi OS 5 deprecated and unsupported
-# Debian 11 (UniFi OS 5) is EOL since 2026-08-31 and bullseye-security has started pruning debs,
-# so the plain install 404s. these are the bullseye main builds that are still available (#43)
-BULLSEYE_APT_FALLBACK = (
-    "apt-get install -y --allow-downgrades --no-install-recommends "
-    "mosquitto-clients=2.0.11-1+deb11u1 libmosquitto1=2.0.11-1+deb11u1 libcjson1=1.7.14-1+deb11u1 "
-    "python3-pip=20.3.4-4+deb11u1 python-pip-whl=20.3.4-4+deb11u1 "
-    "python3-setuptools=52.0.0-4 python3-pkg-resources=52.0.0-4"
+BUNDLE_DIR = "/root/unifi_unas"
+# same hash as _read_bundle, run against the deployed files
+REMOTE_HASH_SCRIPT = (
+    "import hashlib,sys\n"
+    "d=hashlib.sha256()\n"
+    "for p in sys.argv[1:]:\n"
+    "    d.update(p.encode()+b'\\0'+open(p,'rb').read()+b'\\0')\n"
+    "print(d.hexdigest())"
 )
-# left behind by the bash fan controller shipped up to 0.9.x
-LEGACY_FAN_CLEANUP = (
-    "rm -f /root/fan_control.sh /tmp/fan_control_state /tmp/fan_control_state.lock "
-    "/tmp/fan_control_last_pwm /var/log/fan_control.log /var/log/fan_control.log.[1-9]"
+UNIT_DIR = "/etc/systemd/system"
+SERVICES = ("unas_monitor", "fan_control")
+# left behind by 0.9.x
+LEGACY_CLEANUP = (
+    "if [ -f /root/unas_monitor.py ]; then "
+    "pip3 uninstall -y --break-system-packages paho-mqtt >/dev/null 2>&1 "
+    "|| pip3 uninstall -y paho-mqtt >/dev/null 2>&1; "
+    "apt-get remove -y mosquitto-clients >/dev/null 2>&1; fi; "
+    "rm -f /root/unas_monitor.py /root/fan_control.sh /root/fan_control.py /root/fan_control.json "
+    "/root/fan_control.tmp /tmp/fan_control_state /tmp/fan_control_state.lock /tmp/fan_control_last_pwm "
+    "/tmp/unas_hdd_temp /tmp/unas_hdd_temp.tmp /tmp/unas_monitor_interval "
+    "/var/log/fan_control.log /var/log/fan_control.log.[1-9]"
 )
-APT_TOOLS_PROBE = "which mosquitto_sub >/dev/null 2>&1 && which pip3 >/dev/null 2>&1 && echo ok"
 
 
 class SSHManager:
@@ -169,15 +174,14 @@ class SSHManager:
             result = await self._conn.run(command, check=False)
         return getattr(result, "stdout", "") or "", getattr(result, "stderr", "") or ""
 
-    async def scripts_installed(self) -> bool:
+    async def scripts_installed(self, device_model: str, mqtt_root: str) -> bool:
+        files, digest = await self._bundle(device_model, mqtt_root)
+        paths = " ".join(shlex.quote(path) for path in sorted(files))
         stdout, _ = await self.execute_command(
-            "test -f /root/unas_monitor.py && test -f /root/fan_control.py "
-            f"&& {PAHO_PROBE} 2>/dev/null "
-            "&& which mosquitto_sub >/dev/null 2>&1 "
-            "&& echo 'yes' || echo 'no'"
+            f"python3 -c {shlex.quote(REMOTE_HASH_SCRIPT)} {paths} 2>/dev/null"
         )
-        installed = stdout.strip() == "yes"
-        _LOGGER.debug("Scripts installed: %s", installed)
+        installed = stdout.strip() == digest
+        _LOGGER.debug("Scripts installed and current: %s", installed)
         return installed
 
     async def service_running(self, service_name: str) -> bool:
@@ -213,81 +217,54 @@ class SSHManager:
             _LOGGER.warning("Failed to kick native fan control: %s", stdout.strip())
         return success
 
-    def _replace_mqtt_credentials(self, script: str, mqtt_root: str) -> str:
-        replacements = {
-            "MQTT_HOST": self.mqtt_host,
-            "MQTT_USER": self.mqtt_user,
-            "MQTT_PASS": self.mqtt_password,
-            "MQTT_ROOT": mqtt_root,
-            "MQTT_PORT": str(int(self.mqtt_port)),
-            "MQTT_TLS": "true" if self.mqtt_tls else "false",
-            "MQTT_TLS_INSECURE": "true" if self.mqtt_tls_insecure else "false",
+    def _read_bundle(self, device_model: str, mqtt_root: str) -> tuple[dict[str, tuple[bytes, int]], str]:
+        files: dict[str, tuple[bytes, int]] = {}
+        for path in sorted(SCRIPTS_DIR.rglob("*")):
+            rel = path.relative_to(SCRIPTS_DIR)
+            if path.is_dir() or any(part.startswith((".", "__pycache__")) for part in rel.parts):
+                continue
+            if path.suffix == ".service":
+                files[f"{UNIT_DIR}/{rel.as_posix()}"] = (path.read_bytes(), 0o644)
+            else:
+                files[f"{BUNDLE_DIR}/{rel.as_posix()}"] = (path.read_bytes(), 0o644)
+        config = {
+            "mqtt": {
+                "host": self.mqtt_host,
+                "port": int(self.mqtt_port),
+                "user": self.mqtt_user,
+                "password": self.mqtt_password,
+                "tls": bool(self.mqtt_tls),
+                "tls_insecure": bool(self.mqtt_tls_insecure),
+            },
+            "root": mqtt_root,
+            "device_model": device_model,
         }
+        files[f"{BUNDLE_DIR}/config.json"] = (json.dumps(config, indent=2).encode(), 0o600)
 
-        for key, value in replacements.items():
-            # escape for a Python string literal
-            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-            script = script.replace(f'{key} = "REPLACE_ME"', f'{key} = "{escaped}"')
+        digest = hashlib.sha256()
+        for remote, (content, _) in sorted(files.items()):
+            digest.update(remote.encode() + b"\0" + content + b"\0")
+        return files, digest.hexdigest()
 
-        return script
+    async def _bundle(self, device_model: str, mqtt_root: str) -> tuple[dict[str, tuple[bytes, int]], str]:
+        return await asyncio.get_running_loop().run_in_executor(
+            None, self._read_bundle, device_model, mqtt_root
+        )
 
     async def deploy_scripts(self, device_model: str, mqtt_root: str) -> None:
         await self.connect()
         _LOGGER.info("Deploying scripts for device model: %s", device_model)
 
         try:
-            async with aiofiles.open(SCRIPTS_DIR / "unas_monitor.py", "r") as f:
-                monitor_script = await f.read()
-            async with aiofiles.open(SCRIPTS_DIR / "unas_monitor.service", "r") as f:
-                monitor_service = await f.read()
-            async with aiofiles.open(SCRIPTS_DIR / "fan_control.py", "r") as f:
-                fan_control_script = await f.read()
-            async with aiofiles.open(SCRIPTS_DIR / "fan_control.service", "r") as f:
-                fan_control_service = await f.read()
-
-            if self.mqtt_host and self.mqtt_user and self.mqtt_password:
-                monitor_script = self._replace_mqtt_credentials(monitor_script, mqtt_root)
-                fan_control_script = self._replace_mqtt_credentials(fan_control_script, mqtt_root)
-
-            escaped_model = device_model.replace("\\", "\\\\").replace('"', '\\"')
-            monitor_script = monitor_script.replace(
-                'DEVICE_MODEL = "UNAS_PRO"', f'DEVICE_MODEL = "{escaped_model}"'
-            )
-
-            await self._upload_file("/root/unas_monitor.py", monitor_script, executable=True)
-            await self._upload_file("/etc/systemd/system/unas_monitor.service", monitor_service)
-            await self._upload_file("/root/fan_control.py", fan_control_script, executable=True)
-            await self._upload_file("/etc/systemd/system/fan_control.service", fan_control_service)
-
-            await self.execute_command("apt-get update")
-            _, apt_stderr = await self.execute_command(
-                "apt-get install -y --no-install-recommends mosquitto-clients python3-pip"
-            )
-            stdout, _ = await self.execute_command(APT_TOOLS_PROBE)
-            if stdout.strip() != "ok":
-                _, fallback_stderr = await self.execute_command(BULLSEYE_APT_FALLBACK)
-                apt_stderr = f"{apt_stderr.strip()}\nfallback: {fallback_stderr.strip()}"
-                stdout, _ = await self.execute_command(APT_TOOLS_PROBE)
-            if stdout.strip() != "ok":
-                raise RuntimeError(f"apt install failed: {apt_stderr.strip()}")
-            # --break-system-packages is required on UniFi OS 6 (Debian 13, PEP 668) and unknown to
-            # the pip shipped with OS 5 (Debian 11), so try it first and fall back
-            _, pip_stderr = await self.execute_command(
-                "pip3 install --ignore-installed --break-system-packages paho-mqtt==2.1.0 "
-                "|| pip3 install --ignore-installed paho-mqtt==2.1.0"
-            )
-            stdout, _ = await self.execute_command(f"{PAHO_PROBE} 2>/dev/null && echo ok")
-            if stdout.strip() != "ok":
-                raise RuntimeError(
-                    f"paho-mqtt 2.x not importable after pip install: {pip_stderr.strip()}"
-                )
+            files, _ = await self._bundle(device_model, mqtt_root)
+            await self.execute_command(f"rm -rf {BUNDLE_DIR}/vendor")
+            await self._upload_files(files)
 
             await self.execute_command("systemctl daemon-reload")
-            await self.execute_command("systemctl enable unas_monitor")
-            await self.execute_command("systemctl restart unas_monitor")
-            await self.execute_command("systemctl enable fan_control")
-            await self.execute_command("systemctl restart fan_control")
-            await self.execute_command(LEGACY_FAN_CLEANUP)
+            for service in SERVICES:
+                await self.execute_command(f"systemctl enable {service}")
+                await self.execute_command(f"systemctl restart {service}")
+            await self.execute_command(LEGACY_CLEANUP)
 
             _LOGGER.info("Scripts deployed and services started")
 
@@ -295,17 +272,19 @@ class SSHManager:
             _LOGGER.error("Failed to deploy scripts: %s", err)
             raise
 
-    async def _upload_file(self, remote_path: str, content: str, executable: bool = False) -> None:
+    async def _upload_files(self, files: dict[str, tuple[bytes, int]]) -> None:
         async with self._lock:
             if self._conn is None:
                 raise ConnectionError("SSH connection not established")
             async with self._conn.start_sftp_client() as sftp:
-                async with sftp.open(remote_path, "w") as remote_file:
-                    await remote_file.write(content)
-
-        if executable:
-            safe_path = shlex.quote(remote_path)
-            await self.execute_command(f"chmod +x {safe_path}")
+                await sftp.makedirs(BUNDLE_DIR, attrs=asyncssh.SFTPAttrs(permissions=0o700), exist_ok=True)
+                await sftp.chmod(BUNDLE_DIR, 0o700)
+                for remote_path, (content, mode) in files.items():
+                    await sftp.makedirs(posixpath.dirname(remote_path), exist_ok=True)
+                    attrs = asyncssh.SFTPAttrs(permissions=mode)
+                    async with sftp.open(remote_path, "wb", attrs=attrs) as remote_file:
+                        await remote_file.write(content)
+                    await sftp.chmod(remote_path, mode)
 
     async def execute_backup_api(self, method: str, endpoint: str) -> dict:
         cmd = f'''curl -s -X {method} "http://localhost:16080{endpoint}" \
