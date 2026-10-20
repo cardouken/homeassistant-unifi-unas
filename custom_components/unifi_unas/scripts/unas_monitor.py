@@ -210,9 +210,10 @@ class UNASMonitor:
             with open('/data/unifi-core/config/cache/users.json') as f:
                 users = json.load(f)
             if users and isinstance(users, list):
-                self._admin_uid = users[0].get('id')
+                owners = [u for u in users if isinstance(u, dict) and u.get('isOwner')]
+                self._admin_uid = (owners or users)[0].get('id')
                 return self._admin_uid
-        except (OSError, json.JSONDecodeError, KeyError, IndexError):
+        except (OSError, json.JSONDecodeError, KeyError, IndexError, AttributeError):
             pass
         return None
 

@@ -257,10 +257,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _record_host_key_pin(hass, entry, manager)
 
         mqtt_root = get_mqtt_topics(entry.entry_id)["root"]
-        scripts_installed = await manager.scripts_installed(device_model, mqtt_root)
+        _, outdated = await manager.bundle_status(device_model, mqtt_root)
         if (
             last_deploy_version != current_version
-            or not scripts_installed
+            or outdated
             or is_dev_version
             or redeploy_requested
         ):
@@ -516,10 +516,10 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
         try:
             device_model = self.entry.data[CONF_DEVICE_MODEL]
             mqtt_root = get_mqtt_topics(self.entry.entry_id)["root"]
-            scripts_installed = await self.ssh_manager.scripts_installed(device_model, mqtt_root)
+            status, outdated = await self.ssh_manager.bundle_status(device_model, mqtt_root)
 
-            if not scripts_installed or self.pending_script_deploy:
-                reason = "missing or outdated" if not scripts_installed else "pending upgrade"
+            if outdated or self.pending_script_deploy:
+                reason = f"outdated ({', '.join(outdated)})" if outdated else "pending upgrade"
                 _LOGGER.info("Scripts %s, deploying...", reason)
                 await self.ssh_manager.deploy_scripts(device_model, mqtt_root)
                 self.pending_script_deploy = False
@@ -527,18 +527,16 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
                 new_data = dict(self.entry.data)
                 new_data[LAST_DEPLOY_VERSION_KEY] = str(integration.version)
                 self.hass.config_entries.async_update_entry(self.entry, data=new_data)
-                scripts_installed = True
-
-            monitor_running = await self.ssh_manager.service_running("unas_monitor")
-            fan_control_running = await self.ssh_manager.service_running("fan_control")
+                status, outdated = await self.ssh_manager.bundle_status(device_model, mqtt_root)
 
             _record_host_key_pin(self.hass, self.entry, self.ssh_manager)
 
+            services = status.get("services") or {}
             data.update({
-                "scripts_installed": scripts_installed,
+                "scripts_installed": not outdated,
                 "ssh_connected": True,
-                "monitor_running": monitor_running,
-                "fan_control_running": fan_control_running,
+                "monitor_running": services.get("unas_monitor") == "active",
+                "fan_control_running": services.get("fan_control") == "active",
             })
 
             if self.ssh_failed_since is not None:
@@ -547,15 +545,11 @@ class UNASDataUpdateCoordinator(DataUpdateCoordinator):
             ssh_issue_id = f"ssh_unavailable_{self.entry.entry_id}"
             ir.async_delete_issue(self.hass, DOMAIN, ssh_issue_id)
 
-            try:
-                result = await self.ssh_manager.execute_backup_api("GET", "/api/v1/remote-backup/tasks")
-                if result.get("data"):
-                    data["backup_tasks"] = result["data"]
-                else:
-                    data["backup_tasks"] = []
-            except Exception as err:
-                _LOGGER.debug("Could not fetch backup tasks: %s", err)
-                data["backup_tasks"] = []
+            if status.get("backup_tasks") is not None:
+                data["backup_tasks"] = status["backup_tasks"]
+            else:
+                _LOGGER.debug("Could not fetch backup tasks: %s", status.get("backup_error"))
+                data["backup_tasks"] = self._ssh_status.get("backup_tasks", [])
 
         except asyncssh.HostKeyNotVerifiable as err:
             # A host-key mismatch (or unreadable pin) after setup. Raise the

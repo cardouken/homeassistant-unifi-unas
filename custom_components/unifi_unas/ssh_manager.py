@@ -17,15 +17,10 @@ _LOGGER = logging.getLogger(__name__)
 
 SCRIPTS_DIR = Path(__file__).parent / "scripts"
 SSH_CONNECT_TIMEOUT = 30
+COMMAND_TIMEOUT = 30
+DEPLOY_TIMEOUT = 120
+KEEPALIVE_INTERVAL = 30
 BUNDLE_DIR = "/root/unifi_unas"
-# same hash as _read_bundle, run against the deployed files
-REMOTE_HASH_SCRIPT = (
-    "import hashlib,sys\n"
-    "d=hashlib.sha256()\n"
-    "for p in sys.argv[1:]:\n"
-    "    d.update(p.encode()+b'\\0'+open(p,'rb').read()+b'\\0')\n"
-    "print(d.hexdigest())"
-)
 UNIT_DIR = "/etc/systemd/system"
 SERVICES = ("unas_monitor", "fan_control")
 # left behind by 0.9.x
@@ -39,6 +34,17 @@ LEGACY_CLEANUP = (
     "/tmp/unas_hdd_temp /tmp/unas_hdd_temp.tmp /tmp/unas_monitor_interval "
     "/var/log/fan_control.log /var/log/fan_control.log.[1-9]"
 )
+
+
+class NASCommandError(Exception):
+    pass
+
+
+def outdated_files(files: dict[str, tuple[bytes, int]], remote_hashes: dict[str, str | None]) -> list[str]:
+    return sorted(
+        path for path, (content, _) in files.items()
+        if remote_hashes.get(path) != hashlib.sha256(content).hexdigest()
+    )
 
 
 class SSHManager:
@@ -76,24 +82,16 @@ class SSHManager:
         self.server_host_key: Optional[str] = None
         self._conn: Optional[asyncssh.SSHClientConnection] = None
         self._lock = asyncio.Lock()
+        self._closed = False
 
     async def connect(self) -> None:
+        # the lock only guards (re)connecting, commands run concurrently over the one connection
         async with self._lock:
-            if self._conn:
-                try:
-                    await self._conn.run("true", timeout=2, check=False)
-                    _LOGGER.debug("SSH connection reused")
-                    return
-                except asyncssh.Error:
-                    _LOGGER.debug("SSH connection stale, reconnecting")
-                except asyncio.TimeoutError:
-                    _LOGGER.debug("SSH connection timed out, reconnecting")
-                try:
-                    self._conn.close()
-                    await self._conn.wait_closed()
-                except asyncssh.Error:
-                    pass
-                self._conn = None
+            if self._closed:
+                raise ConnectionAbortedError("SSH connection closed")
+            if self._conn is not None and not self._conn.is_closed():
+                return
+            self._conn = None
 
             _LOGGER.debug("Establishing SSH connection to %s", self.host)
 
@@ -109,7 +107,7 @@ class SSHManager:
 
             known_hosts = self._resolve_known_hosts()
 
-            self._conn = await asyncio.wait_for(
+            conn = await asyncio.wait_for(
                 asyncssh.connect(
                     self.host,
                     port=self.port,
@@ -117,9 +115,16 @@ class SSHManager:
                     password=self.password if self.password else None,
                     client_keys=client_keys,
                     known_hosts=known_hosts,
+                    keepalive_interval=KEEPALIVE_INTERVAL,
+                    keepalive_count_max=3,
                 ),
                 timeout=SSH_CONNECT_TIMEOUT,
             )
+            if self._closed:
+                # disconnected (unloaded) while this was connecting, nothing would close it
+                conn.close()
+                raise ConnectionAbortedError("SSH connection closed")
+            self._conn = conn
             self._capture_server_host_key()
             _LOGGER.debug("SSH connection established")
 
@@ -160,38 +165,58 @@ class SSHManager:
         self.server_host_key = f"{hostspec} {parts[0]} {parts[1]}"
 
     async def disconnect(self) -> None:
-        async with self._lock:
-            if self._conn:
-                self._conn.close()
-                await self._conn.wait_closed()
-                self._conn = None
+        # closing aborts commands still running instead of waiting for them
+        self._closed = True
+        conn, self._conn = self._conn, None
+        if conn is not None:
+            conn.close()
+            await conn.wait_closed()
 
-    async def execute_command(self, command: str) -> tuple[str, str]:
+    async def execute_command(
+            self, command: str, timeout: float = COMMAND_TIMEOUT, input: str | None = None
+    ) -> tuple[str, str]:
         await self.connect()
-        async with self._lock:
-            if self._conn is None:
-                raise ConnectionError("SSH connection not established")
-            result = await self._conn.run(command, check=False)
+        conn = self._conn
+        if conn is None:
+            raise ConnectionError("SSH connection not established")
+        try:
+            result = await conn.run(command, check=False, timeout=timeout, input=input)
+        except asyncssh.DisconnectError:
+            if self._conn is conn:
+                self._conn = None
+            raise
         return getattr(result, "stdout", "") or "", getattr(result, "stderr", "") or ""
 
-    async def scripts_installed(self, device_model: str, mqtt_root: str) -> bool:
-        files, digest = await self._bundle(device_model, mqtt_root)
-        paths = " ".join(shlex.quote(path) for path in sorted(files))
-        stdout, _ = await self.execute_command(
-            f"python3 -c {shlex.quote(REMOTE_HASH_SCRIPT)} {paths} 2>/dev/null"
+    async def _helper(self, *args: str) -> dict:
+        script = await asyncio.get_running_loop().run_in_executor(
+            None, (SCRIPTS_DIR / "status.py").read_text
         )
-        installed = stdout.strip() == digest
-        _LOGGER.debug("Scripts installed and current: %s", installed)
-        return installed
+        stdout, stderr = await self.execute_command(
+            "python3 - " + " ".join(shlex.quote(arg) for arg in args), input=script
+        )
+        try:
+            result = json.loads(stdout)
+        except ValueError:
+            raise NASCommandError(f"status helper failed: {(stderr or stdout).strip()[-300:]}") from None
+        if not isinstance(result, dict):
+            raise NASCommandError("status helper returned no result")
+        if "error" in result:
+            raise NASCommandError(result["error"])
+        return result
 
-    async def service_running(self, service_name: str) -> bool:
-        safe_name = shlex.quote(service_name)
-        stdout, _ = await self.execute_command(
-            f"systemctl is-active {safe_name} 2>/dev/null || echo 'inactive'"
-        )
-        running = stdout.strip() == "active"
-        _LOGGER.debug("Service %s running: %s", service_name, running)
-        return running
+    async def status(self, paths: list[str]) -> dict:
+        return await self._helper("status", *paths)
+
+    async def bundle_status(self, device_model: str, mqtt_root: str) -> tuple[dict, list[str]]:
+        files = await self.bundle(device_model, mqtt_root)
+        status = await self.status(sorted(files))
+        return status, outdated_files(files, status.get("files") or {})
+
+    async def run_backup(self, task_id: str) -> None:
+        await self._helper("run-backup", task_id)
+
+    async def set_backup_schedule(self, task_id: str, enabled: bool) -> None:
+        await self._helper("set-schedule", task_id, "on" if enabled else "off")
 
     async def kick_native_fan_control(self) -> bool:
         # uhwd (native fan daemon) calculates PID values but doesn't write them to sysfs until it receives an
@@ -217,7 +242,7 @@ class SSHManager:
             _LOGGER.warning("Failed to kick native fan control: %s", stdout.strip())
         return success
 
-    def _read_bundle(self, device_model: str, mqtt_root: str) -> tuple[dict[str, tuple[bytes, int]], str]:
+    def _read_bundle(self, device_model: str, mqtt_root: str) -> dict[str, tuple[bytes, int]]:
         files: dict[str, tuple[bytes, int]] = {}
         for path in sorted(SCRIPTS_DIR.rglob("*")):
             rel = path.relative_to(SCRIPTS_DIR)
@@ -240,13 +265,9 @@ class SSHManager:
             "device_model": device_model,
         }
         files[f"{BUNDLE_DIR}/config.json"] = (json.dumps(config, indent=2).encode(), 0o600)
+        return files
 
-        digest = hashlib.sha256()
-        for remote, (content, _) in sorted(files.items()):
-            digest.update(remote.encode() + b"\0" + content + b"\0")
-        return files, digest.hexdigest()
-
-    async def _bundle(self, device_model: str, mqtt_root: str) -> tuple[dict[str, tuple[bytes, int]], str]:
+    async def bundle(self, device_model: str, mqtt_root: str) -> dict[str, tuple[bytes, int]]:
         return await asyncio.get_running_loop().run_in_executor(
             None, self._read_bundle, device_model, mqtt_root
         )
@@ -256,15 +277,15 @@ class SSHManager:
         _LOGGER.info("Deploying scripts for device model: %s", device_model)
 
         try:
-            files, _ = await self._bundle(device_model, mqtt_root)
+            files = await self.bundle(device_model, mqtt_root)
             await self.execute_command(f"rm -rf {BUNDLE_DIR}/vendor")
             await self._upload_files(files)
 
             await self.execute_command("systemctl daemon-reload")
             for service in SERVICES:
                 await self.execute_command(f"systemctl enable {service}")
-                await self.execute_command(f"systemctl restart {service}")
-            await self.execute_command(LEGACY_CLEANUP)
+                await self.execute_command(f"systemctl restart {service}", timeout=DEPLOY_TIMEOUT)
+            await self.execute_command(LEGACY_CLEANUP, timeout=DEPLOY_TIMEOUT)
 
             _LOGGER.info("Scripts deployed and services started")
 
@@ -273,50 +294,15 @@ class SSHManager:
             raise
 
     async def _upload_files(self, files: dict[str, tuple[bytes, int]]) -> None:
-        async with self._lock:
-            if self._conn is None:
-                raise ConnectionError("SSH connection not established")
-            async with self._conn.start_sftp_client() as sftp:
-                await sftp.makedirs(BUNDLE_DIR, attrs=asyncssh.SFTPAttrs(permissions=0o700), exist_ok=True)
-                await sftp.chmod(BUNDLE_DIR, 0o700)
-                for remote_path, (content, mode) in files.items():
-                    await sftp.makedirs(posixpath.dirname(remote_path), exist_ok=True)
-                    attrs = asyncssh.SFTPAttrs(permissions=mode)
-                    async with sftp.open(remote_path, "wb", attrs=attrs) as remote_file:
-                        await remote_file.write(content)
-                    await sftp.chmod(remote_path, mode)
-
-    async def execute_backup_api(self, method: str, endpoint: str) -> dict:
-        cmd = f'''curl -s -X {method} "http://localhost:16080{endpoint}" \
-            -H "X-UserId: $(jq -r '.[0].id' /data/unifi-core/config/cache/users.json)" \
-            -H "X-UserRole: owner" \
-            -H "X-UserAccessMask: 114654" \
-            -H "X-UserPermissionMask: 16382"'''
-        stdout, stderr = await self.execute_command(cmd)
-        if not stdout.strip():
-            _LOGGER.debug("Backup API returned empty response for %s %s", method, endpoint)
-            return {}
-        try:
-            return json.loads(stdout)
-        except json.JSONDecodeError as err:
-            _LOGGER.warning("Failed to parse backup API response: %s", err)
-            return {}
-
-    async def update_backup_task(self, task_id: str, updates: dict) -> dict:
-        payload = json.dumps(updates)
-        escaped_payload = shlex.quote(payload)
-        cmd = f'''curl -s -X PATCH "http://localhost:16080/api/v1/remote-backup/tasks/{task_id}" \
-            -H "Content-Type: application/json" \
-            -H "X-UserId: $(jq -r '.[0].id' /data/unifi-core/config/cache/users.json)" \
-            -H "X-UserRole: owner" \
-            -H "X-UserAccessMask: 114654" \
-            -H "X-UserPermissionMask: 16382" \
-            -d {escaped_payload}'''
-        stdout, stderr = await self.execute_command(cmd)
-        if not stdout.strip():
-            return {}
-        try:
-            return json.loads(stdout)
-        except json.JSONDecodeError as err:
-            _LOGGER.warning("Failed to parse backup API update response: %s", err)
-            return {}
+        conn = self._conn
+        if conn is None:
+            raise ConnectionError("SSH connection not established")
+        async with asyncio.timeout(DEPLOY_TIMEOUT), conn.start_sftp_client() as sftp:
+            await sftp.makedirs(BUNDLE_DIR, attrs=asyncssh.SFTPAttrs(permissions=0o700), exist_ok=True)
+            await sftp.chmod(BUNDLE_DIR, 0o700)
+            for remote_path, (content, mode) in files.items():
+                await sftp.makedirs(posixpath.dirname(remote_path), exist_ok=True)
+                attrs = asyncssh.SFTPAttrs(permissions=mode)
+                async with sftp.open(remote_path, "wb", attrs=attrs) as remote_file:
+                    await remote_file.write(content)
+                await sftp.chmod(remote_path, mode)

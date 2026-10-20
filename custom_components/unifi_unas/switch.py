@@ -5,6 +5,7 @@ import logging
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -102,10 +103,8 @@ class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
         await self._set_schedule_enabled(False)
 
     async def _set_schedule_enabled(self, enabled):
-        task = self.coordinator.find_backup_task(self._task_id)
-        if not task:
-            return
-        schedule = task.get("schedule", {}).copy()
-        schedule["enable"] = enabled
-        await self.coordinator.ssh_manager.update_backup_task(self._task_id, {"schedule": schedule})
+        try:
+            await self.coordinator.ssh_manager.set_backup_schedule(self._task_id, enabled)
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to update the backup schedule: {err}") from err
         await self.coordinator.async_refresh_ssh_status()

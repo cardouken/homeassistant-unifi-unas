@@ -172,9 +172,8 @@ class UNASBackupTriggerButton(CoordinatorEntity, ButtonEntity):
         return any(task["id"] == self._task_id for task in backup_tasks)
 
     async def async_press(self) -> None:
-        result = await self.coordinator.ssh_manager.execute_backup_api(
-            "POST", f"/api/v1/remote-backup/run-task/{self._task_id}"
-        )
-        if result.get("data") != "OK":
-            raise HomeAssistantError(f"Failed to trigger backup: {result}")
+        try:
+            await self.coordinator.ssh_manager.run_backup(self._task_id)
+        except Exception as err:
+            raise HomeAssistantError(f"Failed to trigger backup: {err}") from err
         await self.coordinator.async_refresh_ssh_status()

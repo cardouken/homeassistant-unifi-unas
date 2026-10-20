@@ -108,13 +108,6 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         except Exception as err:
             _LOGGER.error("Failed to publish fan mode: %s", err)
 
-    async def _ensure_service_running(self) -> None:
-        try:
-            if not await self.coordinator.ssh_manager.service_running("fan_control"):
-                await self.coordinator.ssh_manager.execute_command("systemctl start fan_control")
-        except Exception as err:
-            _LOGGER.error("Failed to start fan_control service: %s", err)
-
     @property
     def available(self) -> bool:
         mqtt_available = self.coordinator.mqtt_client.is_available()
@@ -139,8 +132,6 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         return {"last_pwm": self._last_pwm} if self._last_pwm is not None else {}
 
     async def async_select_option(self, option: str) -> None:
-        await self._ensure_service_running()
-
         if option == self._mode_managed:
             await self._publish_mode("unas_managed")
             try:
