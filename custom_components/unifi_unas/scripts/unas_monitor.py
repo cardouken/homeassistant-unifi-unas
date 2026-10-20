@@ -34,6 +34,8 @@ MONITOR_INTERVAL_TOPIC = f"{MQTT_CONTROL}/monitor_interval"
 # re-asserted at least this often; changed values publish immediately.
 REPUBLISH_INTERVAL = 60
 SHARE_CACHE_TTL = 300
+DEVICE_INFO_TTL = 3600
+HEARTBEAT_INTERVAL = 600
 _UNSET = object()
 
 DEVICE_MODEL = CONFIG.get("device_model", "UNAS_PRO")
@@ -113,6 +115,9 @@ class UNASMonitor:
         self._storage = _UNSET  # /api/v2/storage, fetched once per cycle
         self._user_map_cache = None  # (ts, user_map, console_owner)
         self._share_members_cache = {}  # drive_id -> (ts, member_count, members)
+        self._device_info = None
+        self._section_errors = {}
+        self._last_heartbeat = None
 
         if mqtt_enabled:
             self.mqtt = mqtt_client(CONFIG, MQTT_AVAILABILITY)
@@ -136,8 +141,6 @@ class UNASMonitor:
         self.bay_cache = {}
         self.known_drives = set()
         self.previous_drive_map = {}  # serial -> bay
-        self.drive_removed_at = {}  # serial -> (timestamp, bay)
-        self.grace_period = 60
         self.prev_cpu_idle = None
         self.prev_cpu_total = None
         self.prev_disk_read = None
@@ -233,7 +236,7 @@ class UNASMonitor:
             if not self._api_warned:
                 logger.warning("Drive API %s returned %d", path, resp.status)
                 self._api_warned = True
-        except (OSError, json.JSONDecodeError) as e:
+        except (OSError, json.JSONDecodeError, http.client.HTTPException) as e:
             if not self._api_warned:
                 logger.warning("Drive API unavailable (%s), falling back to df", e)
                 self._api_warned = True
@@ -245,6 +248,54 @@ class UNASMonitor:
         if self._storage is _UNSET:
             self._storage = self._fetch_api('/api/v2/storage')
         return self._storage
+
+    def _api_bays(self):
+        # occupied bays even when smartctl fails on a drive, so a failing drive isn't removed
+        disks = (self._get_storage() or {}).get('disks') or []
+        return {
+            str(disk['slotId']) for disk in disks
+            if isinstance(disk, dict) and disk.get('state') != 'empty'
+            and str(disk.get('slotId') or '').isdigit()
+        }
+
+    def _api_bay(self, serial):
+        serial = (serial or '').strip()
+        if not serial:
+            return None
+        storage = self._get_storage()
+        for disk in (storage or {}).get('disks') or []:
+            if (disk.get('serial') or '').strip() == serial and disk.get('slotId'):
+                return str(disk['slotId'])
+        return None
+
+    def get_device_info(self):
+        cached = self._device_info
+        if cached and time.monotonic() - cached[0] < DEVICE_INFO_TTL:
+            return cached[1]
+        conn = http.client.HTTPConnection('127.0.0.1', 11081, timeout=5)
+        try:
+            conn.request('GET', '/api/system')
+            resp = conn.getresponse()
+            data = json.loads(resp.read()) if resp.status == 200 else None
+        except (OSError, json.JSONDecodeError, http.client.HTTPException):
+            data = None
+        finally:
+            conn.close()
+        hardware = (data or {}).get('hardware') or {}
+        if not hardware:
+            return None
+        sysid = hardware.get('sysid')
+        info = {
+            'name': hardware.get('name'),
+            'shortname': hardware.get('shortname'),
+            'sysid': f"{sysid:04x}" if isinstance(sysid, int) else None,
+            'serial': hardware.get('serialno'),
+            'mac': hardware.get('mac'),
+            'hw_revision': hardware.get('hwrev'),
+            'firmware': hardware.get('firmwareVersion'),
+        }
+        self._device_info = (time.monotonic(), info)
+        return info
 
     def _fetch_protect_bootstrap(self):
         uid = self._get_admin_user_id()
@@ -267,7 +318,7 @@ class UNASMonitor:
             if not self._protect_api_warned:
                 logger.warning("Protect API /api/bootstrap returned %d", resp.status)
                 self._protect_api_warned = True
-        except (OSError, json.JSONDecodeError) as e:
+        except (OSError, json.JSONDecodeError, http.client.HTTPException) as e:
             if not self._protect_api_warned:
                 logger.warning("Protect API unavailable (%s)", e)
                 self._protect_api_warned = True
@@ -365,7 +416,7 @@ class UNASMonitor:
 
         drives_data = self._fetch_api('/api/v2/drives', need_auth=True)
         if not drives_data or 'drives' not in drives_data:
-            return []
+            return None
 
         shares = []
         for drive in drives_data['drives']:
@@ -543,7 +594,11 @@ class UNASMonitor:
 
         return round(read_mbps, 2), round(write_mbps, 2)
 
-    def get_bay_number(self, device):
+    def get_bay_number(self, device, serial):
+        # ATA port maps are only needed on UNVR, which has no storage API
+        bay = self._api_bay(serial)
+        if bay:
+            return bay
         if device in self.bay_cache:
             return self.bay_cache[device]
 
@@ -566,15 +621,9 @@ class UNASMonitor:
 
         drives = []
         current_drive_map = {}
-        now = time.time()
 
         for device_path in Path('/dev').glob('sd?'):
             device = device_path.name
-            bay = self.get_bay_number(device)
-
-            if not bay:
-                continue
-
             output = self.run_cmd(['smartctl', '-a', '-j', f'/dev/{device}'])
             if not output:
                 logger.debug(f"No smartctl output for /dev/{device}")
@@ -590,6 +639,9 @@ class UNASMonitor:
                 continue
 
             serial = data.get('serial_number', 'Unknown')
+            bay = self.get_bay_number(device, serial)
+            if not bay:
+                continue
 
             temp = data.get('temperature', {}).get('current', 0)
 
@@ -639,30 +691,13 @@ class UNASMonitor:
             drives.append(drive)
             current_drive_map[serial] = bay
 
-        # detect moved drives and remove old bay entities immediately
+        # HA removes a bay once the inventory leaves it out, this only logs the change
         for serial, old_bay in self.previous_drive_map.items():
-            if serial in current_drive_map:
-                new_bay = current_drive_map[serial]
-                if old_bay != new_bay:
-                    logger.info(f"Drive {serial} moved from bay {old_bay} to bay {new_bay}")
-
-        # detect removed drives and start grace period
-        removed_serials = set(self.previous_drive_map.keys()) - set(current_drive_map.keys())
-        for serial in removed_serials:
-            old_bay = self.previous_drive_map[serial]
-            if serial not in self.drive_removed_at:
-                logger.info(f"Drive {serial} removed from bay {old_bay}, starting {self.grace_period}s grace period")
-                self.drive_removed_at[serial] = (now, old_bay)
-
-        # check grace period for removed drives
-        for serial in list(self.drive_removed_at.keys()):
-            removed_time, bay = self.drive_removed_at[serial]
-            if serial in current_drive_map:
-                logger.info(f"Drive {serial} reconnected to bay {current_drive_map[serial]} within grace period")
-                del self.drive_removed_at[serial]
-            elif now - removed_time > self.grace_period:
-                logger.info(f"Drive {serial} grace period expired for bay {bay}")
-                del self.drive_removed_at[serial]
+            new_bay = current_drive_map.get(serial)
+            if new_bay is None:
+                logger.info(f"Drive {serial} no longer in bay {old_bay}")
+            elif new_bay != old_bay:
+                logger.info(f"Drive {serial} moved from bay {old_bay} to bay {new_bay}")
 
         self.previous_drive_map = current_drive_map
         return drives
@@ -823,77 +858,116 @@ class UNASMonitor:
 
         return mounts
 
+    def _section(self, name, collect):
+        try:
+            result = collect()
+        except Exception as e:
+            error = f"{type(e).__name__}: {e}"
+            if self._section_errors.get(name) != error:
+                logger.error(f"Collecting {name} failed: {error}")
+                self._section_errors[name] = error
+            return None
+        if self._section_errors.pop(name, None):
+            logger.info(f"Collecting {name} recovered")
+        return result
+
+    def get_smb_data(self):
+        smb_connections = self.get_smb_connections()
+        clients = []
+        for share in self.get_smb_shares():
+            conn = smb_connections.get(share['pid'], {})
+            clients.append({
+                'username': conn.get('username', 'unknown'),
+                'ip': share['ip'],
+                'share': share['share'],
+            })
+        return clients
+
     def collect_and_publish(self):
         self._storage = _UNSET
-        system = self.get_system_metrics()
-        for key, value in system.items():
-            self.publish_system(key, value)
+        inventory = {}
 
-        drives = self.get_drives()
-        for drive in drives:
+        system = self._section("system metrics", self.get_system_metrics)
+        if system is not None:
+            for key, value in system.items():
+                self.publish_system(key, value)
+
+        device = self._section("device info", self.get_device_info)
+        if device:
+            self.publish_system("device", json.dumps(device, sort_keys=True))
+
+        drives = self._section("drives", self.get_drives)
+        if drives is not None:
+            inventory['bays'] = sorted({d['bay'] for d in drives} | self._api_bays(), key=int)
+        else:
+            inventory['bays'] = None
+        for drive in drives or []:
+            drive = dict(drive)
             bay = drive.pop('bay')
             for key, value in drive.items():
                 self.publish_hdd(bay, key, value)
 
-        nvmes = self.get_nvme_drives()
-        for nvme in nvmes:
+        nvmes = self._section("nvme drives", self.get_nvme_drives)
+        inventory['nvme'] = None if nvmes is None else sorted((n['slot'] for n in nvmes), key=int)
+        for nvme in nvmes or []:
+            nvme = dict(nvme)
             slot = nvme.pop('slot')
             for key, value in nvme.items():
                 self.publish_nvme(slot, key, value)
 
-        pools = self.get_pools_from_api()
-        for pool in pools:
+        pools = self._section("storage pools", self.get_pools_from_api)
+        storage = self._get_storage()
+        # the df fallback numbers pools differently, it can't tell which ones are gone
+        from_api = isinstance(storage, dict) and 'pools' in storage
+        if pools is None or not (from_api or DEVICE_MODEL.startswith("UNVR")):
+            inventory['pools'] = None
+        else:
+            inventory['pools'] = sorted(p['pool'] for p in pools)
+        for pool in pools or []:
+            pool = dict(pool)
             pool_num = pool.pop('pool')
             for key, value in pool.items():
                 self.publish_pool(pool_num, key, value)
 
         # UNVR doesn't have SMB/NFS/shares
+        inventory['shares'] = []
         if not DEVICE_MODEL.startswith("UNVR"):
-            smb_connections = self.get_smb_connections()
-            smb_shares = self.get_smb_shares()
+            smb_clients = self._section("smb connections", self.get_smb_data)
+            if smb_clients is not None:
+                self._publish(f"{MQTT_SMB}/connections", len(smb_clients))
+                self._publish(f"{MQTT_SMB}/clients", json.dumps(smb_clients))
 
-            smb_data = {
-                'count': len(smb_shares),
-                'clients': []
-            }
+            nfs_mounts = self._section("nfs mounts", self.get_nfs_mounts)
+            if nfs_mounts is not None:
+                self._publish(f"{MQTT_NFS}/mounts", len(nfs_mounts))
+                self._publish(f"{MQTT_NFS}/clients", json.dumps(nfs_mounts))
 
-            for share in smb_shares:
-                conn = smb_connections.get(share['pid'], {})
-                smb_data['clients'].append({
-                    'username': conn.get('username', 'unknown'),
-                    'ip': share['ip'],
-                    'share': share['share']
-                })
-
-            self._publish(f"{MQTT_SMB}/connections", smb_data['count'])
-            self._publish(f"{MQTT_SMB}/clients", json.dumps(smb_data['clients']))
-
-            nfs_mounts = self.get_nfs_mounts()
-            nfs_data = {
-                'count': len(nfs_mounts),
-                'clients': nfs_mounts
-            }
-
-            self._publish(f"{MQTT_NFS}/mounts", nfs_data['count'])
-            self._publish(f"{MQTT_NFS}/clients", json.dumps(nfs_data['clients']))
-
-            shares = self.get_shares()
-            for share in shares:
+            shares = self._section("shares", self.get_shares)
+            inventory['shares'] = None if shares is None else sorted(s['name'] for s in shares)
+            for share in shares or []:
+                share = dict(share)
                 name = share.pop('name')
                 for key, value in share.items():
                     self.publish_share(name, key, value)
 
-        drive_temps = [d.get('temperature', 0) for d in drives if 'temperature' in d]
-        nvme_temps = [n.get('temperature', 0) for n in nvmes if 'temperature' in n]
-        
+        self._publish(f"{MQTT_ROOT}/inventory", json.dumps(inventory, sort_keys=True))
+        self._heartbeat(system, drives, nvmes)
+
+    def _heartbeat(self, system, drives, nvmes):
+        now = time.monotonic()
+        if self._last_heartbeat is not None and now - self._last_heartbeat < HEARTBEAT_INTERVAL:
+            return
+        self._last_heartbeat = now
+        system = system or {}
+        drive_temps = [d.get('temperature', 0) for d in drives or [] if 'temperature' in d]
+        nvme_temps = [n.get('temperature', 0) for n in nvmes or [] if 'temperature' in n]
         hdd_str = ', '.join(f"{t}°C" for t in drive_temps) if drive_temps else "no drives"
         nvme_str = f" | NVMe {', '.join(f'{t}°C' for t in nvme_temps)}" if nvme_temps else ""
-
         logger.info(
-            f"{system['fan_speed']} PWM ({system['fan_speed_percent']}%) | "
-            f"CPU {system['cpu_temp']}°C | "
+            f"{system.get('fan_speed')} PWM ({system.get('fan_speed_percent')}%) | "
+            f"CPU {system.get('cpu_temp')}°C | "
             f"HDD {hdd_str}{nvme_str} | "
-            f"R: {system['disk_read']} MB/s W: {system['disk_write']} MB/s"
+            f"R: {system.get('disk_read')} MB/s W: {system.get('disk_write')} MB/s"
         )
 
     def collect(self) -> dict:
@@ -906,6 +980,7 @@ class UNASMonitor:
         self._storage = _UNSET
         data: dict = {}
         data["system"] = self.get_system_metrics()
+        data["device"] = self.get_device_info()
 
         hdd = {}
         for drive in self.get_drives():
@@ -927,23 +1002,14 @@ class UNASMonitor:
 
         # UNVR doesn't have SMB/NFS/shares
         if not DEVICE_MODEL.startswith("UNVR"):
-            smb_connections = self.get_smb_connections()
-            smb_shares = self.get_smb_shares()
-            clients = []
-            for share in smb_shares:
-                conn = smb_connections.get(share['pid'], {})
-                clients.append({
-                    'username': conn.get('username', 'unknown'),
-                    'ip': share['ip'],
-                    'share': share['share'],
-                })
-            data["smb"] = {"connections": len(smb_shares), "clients": clients}
+            clients = self.get_smb_data()
+            data["smb"] = {"connections": len(clients), "clients": clients}
 
             nfs_mounts = self.get_nfs_mounts()
             data["nfs"] = {"mounts": len(nfs_mounts), "clients": nfs_mounts}
 
             shares = {}
-            for share in self.get_shares():
+            for share in self.get_shares() or []:
                 d = dict(share)
                 shares[d.pop("name")] = d
             data["shares"] = shares
