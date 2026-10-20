@@ -371,7 +371,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     hass.data.get(REDEPLOY_AFTER_RELOAD_KEY, set()).discard(entry.entry_id)
-    await _clear_retained_mqtt_topics(hass, entry.entry_id)
 
     manager = _build_ssh_manager(entry)
     try:
@@ -382,6 +381,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         _LOGGER.error("Failed to clean up UNAS (non-critical): %s", err)
     finally:
         await manager.disconnect()
+
+    # daemons first, their offline messages would be retained again
+    await _clear_retained_mqtt_topics(hass, entry.entry_id)
 
 
 class UNASDataUpdateCoordinator(DataUpdateCoordinator):
