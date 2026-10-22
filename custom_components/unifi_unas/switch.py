@@ -3,34 +3,43 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import UNASDataUpdateCoordinator
+from . import UNASConfigEntry
 from .const import DOMAIN, get_backup_device_info
+from .coordinator import UNASServiceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: UNASConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: UNASDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    coordinator.switch_add_entities = async_add_entities
+    coordinator = entry.runtime_data.service
+
+    @callback
+    def _discover() -> None:
+        entry.async_create_background_task(
+            hass, _discover_and_add_backup_switches(coordinator, async_add_entities), f"{DOMAIN} discovery"
+        )
+
+    entry.async_on_unload(coordinator.async_add_listener(_discover))
 
 
 async def _discover_and_add_backup_switches(
-        coordinator: UNASDataUpdateCoordinator,
+        coordinator: UNASServiceCoordinator,
         async_add_entities: AddEntitiesCallback,
 ) -> None:
     from homeassistant.helpers import entity_registry as er
 
-    backup_tasks = coordinator.data.get("backup_tasks", [])
+    if coordinator.data is None:
+        return
+    backup_tasks = coordinator.data["backup_tasks"]
     task_ids = {task["id"] for task in backup_tasks}
 
     entity_reg = er.async_get(coordinator.hass)
@@ -73,7 +82,7 @@ async def _discover_and_add_backup_switches(
 
 
 class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._task_name = task["name"]
@@ -85,9 +94,7 @@ class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def available(self):
-        if not self.coordinator.data.get("ssh_connected", False):
-            return False
-        return self.coordinator.find_backup_task(self._task_id) is not None
+        return self.coordinator.ready and self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def is_on(self):
@@ -107,4 +114,4 @@ class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
             await self.coordinator.ssh_manager.set_backup_schedule(self._task_id, enabled)
         except Exception as err:
             raise HomeAssistantError(f"Failed to update the backup schedule: {err}") from err
-        await self.coordinator.async_refresh_ssh_status()
+        await self.coordinator.async_request_refresh()

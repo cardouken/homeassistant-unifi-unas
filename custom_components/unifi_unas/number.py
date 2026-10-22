@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -12,8 +11,9 @@ from homeassistant.helpers.device_registry import DeviceInfo
 
 from homeassistant.components import mqtt
 
-from . import UNASDataUpdateCoordinator
+from . import UNASConfigEntry
 from .const import DOMAIN, get_device_info, get_mqtt_topics
+from .coordinator import UNASDataCoordinator
 from .fan_mode import FanModeMixin
 
 _LOGGER = logging.getLogger(__name__)
@@ -30,12 +30,10 @@ FAN_CURVE_PARAMS = [
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: UNASConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: UNASDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
-        "coordinator"
-    ]
+    coordinator = entry.runtime_data.data
 
     entities = [
         UNASFanSpeedNumber(coordinator, hass),
@@ -54,7 +52,7 @@ async def async_setup_entry(
 
 class UNASFanSpeedNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreEntity):
     def __init__(
-        self, coordinator: UNASDataUpdateCoordinator, hass: HomeAssistant
+        self, coordinator: UNASDataCoordinator, hass: HomeAssistant
     ) -> None:
         super().__init__(coordinator)
         self.hass = hass
@@ -120,9 +118,7 @@ class UNASFanSpeedNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreE
 
     @property
     def available(self) -> bool:
-        mqtt_available = self.coordinator.mqtt_client.is_available()
-        service_running = self.coordinator.data.get("fan_control_running", False)
-        return mqtt_available and service_running
+        return self.coordinator.mqtt_client.fan_available()
 
     @property
     def icon(self) -> str:
@@ -158,7 +154,7 @@ class UNASFanSpeedNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreE
 class UNASFanCurveNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreEntity):
     def __init__(
         self,
-        coordinator: UNASDataUpdateCoordinator,
+        coordinator: UNASDataCoordinator,
         hass: HomeAssistant,
         key: str,
         name: str,
@@ -226,21 +222,6 @@ class UNASFanCurveNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreE
 
         await self._subscribe_fan_mode()
 
-        self.hass.loop.call_later(2.0, self._maybe_init_default)
-
-    def _maybe_init_default(self) -> None:
-        if self._attr_native_value is None:
-            self._attr_native_value = int(self._default)
-
-            async def publish_default():
-                try:
-                    await self._publish_to_mqtt(self._default)
-                except Exception as err:
-                    _LOGGER.warning("Failed to publish default value for %s: %s", self._key, err)
-
-            self.hass.async_create_task(publish_default())
-            self.async_write_ha_state()
-
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe:
             self._unsubscribe()
@@ -249,11 +230,7 @@ class UNASFanCurveNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreE
 
     @property
     def available(self) -> bool:
-        mqtt_available = self.coordinator.mqtt_client.is_available()
-        service_running = self.coordinator.data.get("fan_control_running", False)
-        has_value = self._attr_native_value is not None
-
-        if not (mqtt_available and service_running and has_value):
+        if not self.coordinator.mqtt_client.fan_available() or self._attr_native_value is None:
             return False
 
         # Mode-specific availability

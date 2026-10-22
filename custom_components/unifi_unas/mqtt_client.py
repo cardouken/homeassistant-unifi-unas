@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import json
+from collections.abc import Callable
 from typing import Any
 from datetime import datetime, timedelta
 
@@ -18,12 +19,13 @@ _LOGGER = logging.getLogger(__name__)
 MQTT Topic Structure Mapping:
 
 This client subscribes to unas/# and parses topics into keys for entity state.
-When adding new topics, update both the publisher (unas_monitor.py/fan_control.sh) 
+When adding new topics, update both the publisher (unas_monitor.py/fan_control.py)
 and the corresponding handler below.
 
 Topic Pattern                        → Internal Key                   → Type
 ─────────────────────────────────────────────────────────────────────────────────
 unas/availability                    → _status                        → status
+unas/fan/availability                → _fan_status                    → status
 unas/system/{metric}                 → unas_{metric}                  → value
 unas/hdd/{bay}/{metric}              → unas_hdd_{bay}_{metric}        → value
 unas/nvme/{slot}/{metric}            → unas_nvme_{slot}_{metric}      → value
@@ -45,23 +47,23 @@ Examples:
 """
 
 
-REFRESH_DEBOUNCE_SECONDS = 0.5
 MACHINE_ID_WINDOW_SECONDS = 120
 
 
 class UNASMQTTClient:
-    def __init__(self, hass: HomeAssistant, entry_id: str) -> None:
+    def __init__(self, hass: HomeAssistant, entry_id: str, on_update: Callable[[], None]) -> None:
         self.hass = hass
         self.entry_id = entry_id
         self.mqtt_root = get_mqtt_root(entry_id)
+        self._on_update = on_update
         self._data: dict[str, Any] = {}
         self._data_timestamps: dict[str, datetime] = {}
         self._subscriptions: list = []
         self._status: str = "unknown"
+        self._fan_status: str | None = None
         self._last_update: datetime | None = None
-        self._pending_refresh: asyncio.TimerHandle | None = None
-        self._coordinator = None
         self._recent_machine_ids: dict[str, datetime] = {}
+        self.received = asyncio.Event()
 
     async def async_subscribe(self) -> None:
         if mqtt.DOMAIN not in self.hass.data:
@@ -75,11 +77,8 @@ class UNASMQTTClient:
         except Exception as err:
             _LOGGER.error("Failed to subscribe to %s/#: %s", self.mqtt_root, err)
 
-    async def async_unsubscribe(self) -> None:
-        pending = self._pending_refresh
-        self._pending_refresh = None
-        if pending:
-            pending.cancel()
+    @callback
+    def async_unsubscribe(self) -> None:
         count = len(self._subscriptions)
         for unsub in self._subscriptions:
             unsub()
@@ -87,23 +86,14 @@ class UNASMQTTClient:
         _LOGGER.debug("Unsubscribed from %d MQTT topics", count)
 
     def _schedule_refresh(self) -> None:
-        pending = self._pending_refresh
-        if pending:
-            pending.cancel()
-
-        def do_refresh():
-            self._pending_refresh = None
-            coordinator = self._coordinator
-            if coordinator is not None:
-                self.hass.async_create_task(coordinator.async_request_refresh())
-
-        self._pending_refresh = self.hass.loop.call_later(REFRESH_DEBOUNCE_SECONDS, do_refresh)
+        self._on_update()
 
     @callback
     def _handle_message(self, msg) -> None:
         topic = msg.topic
         if not topic.startswith(self.mqtt_root):
             return
+        self.received.set()
         
         parts = topic[len(self.mqtt_root):].lstrip("/").split("/")
         if not parts:
@@ -144,6 +134,11 @@ class UNASMQTTClient:
             elif item == "clients":
                 self._store_attributes("unas_smb_connections", payload)
         
+        elif category == "fan":
+            if item == "availability":
+                self._fan_status = payload
+                self._schedule_refresh()
+
         # unas/nfs/mounts or unas/nfs/clients
         elif category == "nfs":
             if item == "mounts":
@@ -223,6 +218,12 @@ class UNASMQTTClient:
             return True
 
         return False
+
+    def fan_available(self) -> bool:
+        # an older fan daemon never publishes fan/availability, follow the monitor then
+        if self._fan_status is None:
+            return self.is_available()
+        return self._fan_status == "online"
 
     def get_data(self) -> dict[str, Any]:
         self._cleanup_stale_data()

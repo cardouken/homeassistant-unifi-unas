@@ -47,6 +47,16 @@ def outdated_files(files: dict[str, tuple[bytes, int]], remote_hashes: dict[str,
     )
 
 
+def affected_services(paths: list[str]) -> list[str]:
+    affected = set()
+    for path in paths:
+        name = posixpath.basename(path)
+        if path.startswith(f"{BUNDLE_DIR}/vendor/") or name in ("unas_common.py", "config.json"):
+            return list(SERVICES)
+        affected.update(service for service in SERVICES if name in (f"{service}.py", f"{service}.service"))
+    return [service for service in SERVICES if service in affected]
+
+
 class SSHManager:
     def __init__(
             self,
@@ -272,26 +282,33 @@ class SSHManager:
             None, self._read_bundle, device_model, mqtt_root
         )
 
-    async def deploy_scripts(self, device_model: str, mqtt_root: str) -> None:
+    async def deploy_scripts(
+            self, device_model: str, mqtt_root: str, only: list[str] | None = None
+    ) -> list[str]:
+        files = await self.bundle(device_model, mqtt_root)
+        vendor = f"{BUNDLE_DIR}/vendor/"
+        if only is not None:
+            changed = set(only)
+            if any(path.startswith(vendor) for path in changed):
+                # the whole package, so files dropped by a paho upgrade don't linger
+                changed.update(path for path in files if path.startswith(vendor))
+            files = {path: file for path, file in files.items() if path in changed}
+        if not files:
+            return []
+
         await self.connect()
-        _LOGGER.info("Deploying scripts for device model: %s", device_model)
+        if only is None or any(path.startswith(vendor) for path in files):
+            await self.execute_command(f"rm -rf {shlex.quote(vendor)}")
+        await self._upload_files(files)
 
-        try:
-            files = await self.bundle(device_model, mqtt_root)
-            await self.execute_command(f"rm -rf {BUNDLE_DIR}/vendor")
-            await self._upload_files(files)
-
+        if only is None or any(path.endswith(".service") for path in files):
             await self.execute_command("systemctl daemon-reload")
-            for service in SERVICES:
-                await self.execute_command(f"systemctl enable {service}")
-                await self.execute_command(f"systemctl restart {service}", timeout=DEPLOY_TIMEOUT)
-            await self.execute_command(LEGACY_CLEANUP, timeout=DEPLOY_TIMEOUT)
-
-            _LOGGER.info("Scripts deployed and services started")
-
-        except Exception as err:
-            _LOGGER.error("Failed to deploy scripts: %s", err)
-            raise
+        services = list(SERVICES) if only is None else affected_services(list(files))
+        for service in services:
+            await self.execute_command(f"systemctl enable {service}")
+            await self.execute_command(f"systemctl restart {service}", timeout=DEPLOY_TIMEOUT)
+        await self.execute_command(LEGACY_CLEANUP, timeout=DEPLOY_TIMEOUT)
+        return services
 
     async def _upload_files(self, files: dict[str, tuple[bytes, int]]) -> None:
         conn = self._conn

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from datetime import datetime, timedelta
@@ -10,7 +9,6 @@ from homeassistant.components.sensor import (
     SensorEntity,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
     UnitOfTemperature,
@@ -23,7 +21,7 @@ from homeassistant.util import dt as dt_util
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
-from . import UNASDataUpdateCoordinator
+from . import UNASConfigEntry
 from .const import (
     BACKUP_STATUS_IDLE,
     BACKUP_STATUS_RUNNING,
@@ -34,6 +32,7 @@ from .const import (
     get_backup_device_info,
     get_device_info,
 )
+from .coordinator import UNASDataCoordinator, UNASServiceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -257,10 +256,11 @@ NVME_SENSORS = [
 
 async def async_setup_entry(
         hass: HomeAssistant,
-        entry: ConfigEntry,
+        entry: UNASConfigEntry,
         async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: UNASDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.data
+    service = entry.runtime_data.service
     device_model = entry.data[CONF_DEVICE_MODEL]
 
     if device_model.startswith("UNVR"):
@@ -279,33 +279,29 @@ async def async_setup_entry(
 
     async_add_entities(entities)
 
-    coordinator.sensor_add_entities = async_add_entities
-
-    async def discover_drives():
+    async def discover_storage():
         await _discover_and_add_drive_sensors(coordinator, async_add_entities)
         await _discover_and_add_nvme_sensors(coordinator, async_add_entities)
         await _discover_and_add_pool_sensors(coordinator, async_add_entities)
         await _discover_and_add_share_sensors(coordinator, async_add_entities)
 
-        if coordinator.discovered_bays or coordinator.discovered_nvmes or coordinator.discovered_pools:
-            return
+    @callback
+    def _discover_storage() -> None:
+        entry.async_create_background_task(hass, discover_storage(), f"{DOMAIN} discovery")
 
-        # if drives not found immediately, poll with shorter intervals (12 × 5s = 60s max)
-        for _ in range(12):
-            await asyncio.sleep(5)
-            await _discover_and_add_drive_sensors(coordinator, async_add_entities)
-            await _discover_and_add_nvme_sensors(coordinator, async_add_entities)
-            await _discover_and_add_pool_sensors(coordinator, async_add_entities)
-            await _discover_and_add_share_sensors(coordinator, async_add_entities)
+    @callback
+    def _discover_backups() -> None:
+        entry.async_create_background_task(
+            hass, _discover_and_add_backup_sensors(service, async_add_entities), f"{DOMAIN} discovery"
+        )
 
-            if coordinator.discovered_bays or coordinator.discovered_nvmes or coordinator.discovered_pools:
-                break
-
-    hass.async_create_task(discover_drives())
+    entry.async_on_unload(coordinator.async_add_listener(_discover_storage))
+    entry.async_on_unload(service.async_add_listener(_discover_backups))
+    _discover_storage()
 
 
 async def _discover_and_add_drive_sensors(
-        coordinator: UNASDataUpdateCoordinator,
+        coordinator: UNASDataCoordinator,
         async_add_entities: AddEntitiesCallback,
 ) -> None:
     from homeassistant.helpers import entity_registry as er, device_registry as dr
@@ -365,7 +361,7 @@ async def _discover_and_add_drive_sensors(
 
 
 async def _discover_and_add_nvme_sensors(
-        coordinator: UNASDataUpdateCoordinator,
+        coordinator: UNASDataCoordinator,
         async_add_entities: AddEntitiesCallback,
 ) -> None:
     from homeassistant.helpers import entity_registry as er, device_registry as dr
@@ -425,7 +421,7 @@ async def _discover_and_add_nvme_sensors(
 
 
 async def _discover_and_add_pool_sensors(
-        coordinator: UNASDataUpdateCoordinator,
+        coordinator: UNASDataCoordinator,
         async_add_entities: AddEntitiesCallback,
 ) -> None:
     from homeassistant.helpers import entity_registry as er
@@ -494,7 +490,7 @@ async def _discover_and_add_pool_sensors(
 class UNASSensor(CoordinatorEntity, SensorEntity):
     def __init__(
             self,
-            coordinator: UNASDataUpdateCoordinator,
+            coordinator: UNASDataCoordinator,
             mqtt_key: str,
             name: str,
             unit: str | None,
@@ -534,7 +530,7 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
         self._attr_native_value = mqtt_data.get(self._mqtt_key)
 
         attr_key = f"{self._mqtt_key}_attributes"
@@ -547,11 +543,11 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
     def available(self) -> bool:
         if not self.coordinator.mqtt_client.is_available():
             return False
-        return self._mqtt_key in self.coordinator.data.get("mqtt_data", {})
+        return self._mqtt_key in self.coordinator.data
 
     @property
     def native_value(self):
-        raw = self.coordinator.data.get("mqtt_data", {}).get(self._mqtt_key)
+        raw = self.coordinator.data.get(self._mqtt_key)
         if raw is not None and self._mqtt_key == "unas_uptime":
             try:
                 uptime_secs = int(float(raw))
@@ -565,7 +561,7 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
 
 
 class UNASFanCurveVisualizationSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator) -> None:
+    def __init__(self, coordinator: UNASDataCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_has_entity_name = True
         self._attr_name = "Fan Curve"
@@ -586,7 +582,7 @@ class UNASFanCurveVisualizationSensor(CoordinatorEntity, SensorEntity):
         self.async_write_ha_state()
 
     def _update_state(self) -> None:
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
 
         min_temp = mqtt_data.get("fan_curve_min_temp", 43)
         max_temp = mqtt_data.get("fan_curve_max_temp", 47)
@@ -640,7 +636,7 @@ class UNASFanCurveVisualizationSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
         return (
                 "fan_curve_min_temp" in mqtt_data
                 and "fan_curve_max_temp" in mqtt_data
@@ -652,7 +648,7 @@ class UNASFanCurveVisualizationSensor(CoordinatorEntity, SensorEntity):
 class UNASNVMeSensor(CoordinatorEntity, SensorEntity):
     def __init__(
             self,
-            coordinator: UNASDataUpdateCoordinator,
+            coordinator: UNASDataCoordinator,
             mqtt_key: str,
             name: str,
             nvme_slot: str,
@@ -691,7 +687,7 @@ class UNASNVMeSensor(CoordinatorEntity, SensorEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
         self._attr_native_value = mqtt_data.get(self._mqtt_key)
         self.async_write_ha_state()
 
@@ -699,19 +695,19 @@ class UNASNVMeSensor(CoordinatorEntity, SensorEntity):
     def available(self) -> bool:
         if not self.coordinator.mqtt_client.is_available():
             return False
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
         return self._mqtt_key in mqtt_data
 
     @property
     def native_value(self):
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
         return mqtt_data.get(self._mqtt_key)
 
 
 class UNASDriveSensor(CoordinatorEntity, SensorEntity):
     def __init__(
             self,
-            coordinator: UNASDataUpdateCoordinator,
+            coordinator: UNASDataCoordinator,
             mqtt_key: str,
             name: str,
             bay_num: str,
@@ -750,7 +746,7 @@ class UNASDriveSensor(CoordinatorEntity, SensorEntity):
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
         self._attr_native_value = mqtt_data.get(self._mqtt_key)
         self.async_write_ha_state()
 
@@ -758,19 +754,19 @@ class UNASDriveSensor(CoordinatorEntity, SensorEntity):
     def available(self) -> bool:
         if not self.coordinator.mqtt_client.is_available():
             return False
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
         return self._mqtt_key in mqtt_data
 
     @property
     def native_value(self):
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
         return mqtt_data.get(self._mqtt_key)
 
 
 class UNASShareSensor(CoordinatorEntity, SensorEntity):
     def __init__(
             self,
-            coordinator: UNASDataUpdateCoordinator,
+            coordinator: UNASDataCoordinator,
             share_name: str,
             sensor_suffix: str,
             name: str,
@@ -805,7 +801,7 @@ class UNASShareSensor(CoordinatorEntity, SensorEntity):
     @callback
     def _handle_coordinator_update(self) -> None:
         self._attr_native_value = self._resolve_value()
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
+        mqtt_data = self.coordinator.data
         if self._sensor_suffix == "pool":
             pool_num = mqtt_data.get(self._mqtt_key)
             if pool_num is not None:
@@ -819,21 +815,27 @@ class UNASShareSensor(CoordinatorEntity, SensorEntity):
                 self._attr_extra_state_attributes = {"members": mqtt_data[attr_key]}
         self.async_write_ha_state()
 
+    def _unlimited(self) -> bool:
+        value = self.coordinator.data.get(self._mqtt_key)
+        return self._sensor_suffix == "quota" and value is not None and int(value) == -1
+
     def _resolve_value(self):
-        mqtt_data = self.coordinator.data.get("mqtt_data", {})
-        value = mqtt_data.get(self._mqtt_key)
-        if self._sensor_suffix == "quota":
-            if value is not None and int(value) == -1:
-                self._attr_native_unit_of_measurement = None
-                return "Unlimited"
-            self._attr_native_unit_of_measurement = "GB"
-        return value
+        if self._unlimited():
+            return "Unlimited"
+        return self.coordinator.data.get(self._mqtt_key)
+
+    @property
+    def native_unit_of_measurement(self) -> str | None:
+        # HA reads the unit before the value, an "Unlimited" state must not carry one
+        if self._unlimited():
+            return None
+        return self._attr_native_unit_of_measurement
 
     @property
     def available(self) -> bool:
         if not self.coordinator.mqtt_client.is_available():
             return False
-        return self._mqtt_key in self.coordinator.data.get("mqtt_data", {})
+        return self._mqtt_key in self.coordinator.data
 
     @property
     def native_value(self):
@@ -841,7 +843,7 @@ class UNASShareSensor(CoordinatorEntity, SensorEntity):
 
 
 async def _discover_and_add_share_sensors(
-        coordinator: UNASDataUpdateCoordinator,
+        coordinator: UNASDataCoordinator,
         async_add_entities: AddEntitiesCallback,
 ) -> None:
     from homeassistant.helpers import entity_registry as er, device_registry as dr
@@ -907,12 +909,14 @@ async def _discover_and_add_share_sensors(
 
 
 async def _discover_and_add_backup_sensors(
-        coordinator: UNASDataUpdateCoordinator,
+        coordinator: UNASServiceCoordinator,
         async_add_entities: AddEntitiesCallback,
 ) -> None:
     from homeassistant.helpers import entity_registry as er, device_registry as dr
 
-    backup_tasks = coordinator.data.get("backup_tasks", [])
+    if coordinator.data is None:
+        return
+    backup_tasks = coordinator.data["backup_tasks"]
     task_ids = {task["id"] for task in backup_tasks}
 
     entity_reg = er.async_get(coordinator.hass)
@@ -976,7 +980,7 @@ async def _discover_and_add_backup_sensors(
 
 
 class UNASBackupStatusSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._task_name = task["name"]
@@ -988,7 +992,7 @@ class UNASBackupStatusSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self):
-        return self.coordinator.find_backup_task(self._task_id) is not None
+        return self.coordinator.ready and self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
@@ -1029,7 +1033,7 @@ class UNASBackupStatusSensor(CoordinatorEntity, SensorEntity):
 
 
 class UNASBackupLastRunSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._attr_has_entity_name = True
@@ -1041,7 +1045,7 @@ class UNASBackupLastRunSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self):
-        return self.coordinator.find_backup_task(self._task_id) is not None
+        return self.coordinator.ready and self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
@@ -1059,7 +1063,7 @@ class UNASBackupLastRunSensor(CoordinatorEntity, SensorEntity):
 
 
 class UNASBackupNextRunSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._attr_has_entity_name = True
@@ -1072,7 +1076,7 @@ class UNASBackupNextRunSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self):
         task = self.coordinator.find_backup_task(self._task_id)
-        if not task:
+        if not self.coordinator.ready or not task:
             return False
         schedule = task.get("schedule", {})
         return schedule.get("enable", False)
@@ -1092,7 +1096,7 @@ class UNASBackupNextRunSensor(CoordinatorEntity, SensorEntity):
 
 
 class UNASBackupDurationSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._attr_has_entity_name = True
@@ -1107,7 +1111,7 @@ class UNASBackupDurationSensor(CoordinatorEntity, SensorEntity):
     @property
     def available(self):
         task = self.coordinator.find_backup_task(self._task_id)
-        if not task:
+        if not self.coordinator.ready or not task:
             return False
         last_run = task.get("lastTaskRun", {})
         if last_run.get("startedAt") and last_run.get("finishedAt"):
@@ -1133,7 +1137,7 @@ class UNASBackupDurationSensor(CoordinatorEntity, SensorEntity):
 
 
 class UNASBackupDestinationSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._attr_has_entity_name = True
@@ -1144,7 +1148,7 @@ class UNASBackupDestinationSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self):
-        return self.coordinator.find_backup_task(self._task_id) is not None
+        return self.coordinator.ready and self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
@@ -1160,7 +1164,7 @@ class UNASBackupDestinationSensor(CoordinatorEntity, SensorEntity):
 
 
 class UNASBackupSourceSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._attr_has_entity_name = True
@@ -1171,7 +1175,7 @@ class UNASBackupSourceSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self):
-        return self.coordinator.find_backup_task(self._task_id) is not None
+        return self.coordinator.ready and self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
@@ -1197,7 +1201,7 @@ class UNASBackupSourceSensor(CoordinatorEntity, SensorEntity):
 
 
 class UNASBackupScheduleSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._attr_has_entity_name = True
@@ -1208,7 +1212,7 @@ class UNASBackupScheduleSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self):
-        return self.coordinator.find_backup_task(self._task_id) is not None
+        return self.coordinator.ready and self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):
@@ -1219,7 +1223,7 @@ class UNASBackupScheduleSensor(CoordinatorEntity, SensorEntity):
 
 
 class UNASBackupNameSensor(CoordinatorEntity, SensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._attr_has_entity_name = True
@@ -1230,7 +1234,7 @@ class UNASBackupNameSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self):
-        return self.coordinator.find_backup_task(self._task_id) is not None
+        return self.coordinator.ready and self.coordinator.find_backup_task(self._task_id) is not None
 
     @property
     def native_value(self):

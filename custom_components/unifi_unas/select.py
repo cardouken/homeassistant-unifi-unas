@@ -4,15 +4,16 @@ import logging
 
 from homeassistant.components import mqtt
 from homeassistant.components.select import SelectEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import UNASDataUpdateCoordinator
+from . import UNASConfigEntry
 from .const import CONF_DEVICE_MODEL, DOMAIN, get_device_info, get_mqtt_topics
+from .coordinator import UNASDataCoordinator
+from .ssh_manager import SSHManager
 from .fan_mode import FanModeMixin
 
 DEFAULT_FAN_SPEED_50_PCT = 128
@@ -33,21 +34,22 @@ RESPONSE_AGGRESSIVE = "Aggressive"
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: UNASConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: UNASDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.data
     async_add_entities([
-        UNASFanModeSelect(coordinator, hass),
+        UNASFanModeSelect(coordinator, hass, entry.runtime_data.ssh),
         UNASTempMetricSelect(coordinator, hass),
         UNASResponseSpeedSelect(coordinator, hass),
     ])
 
 
 class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, hass: HomeAssistant) -> None:
+    def __init__(self, coordinator: UNASDataCoordinator, hass: HomeAssistant, ssh: SSHManager) -> None:
         super().__init__(coordinator)
         self.hass = hass
+        self._ssh = ssh
         self._topics = get_mqtt_topics(coordinator.entry.entry_id)
         self._attr_has_entity_name = True
         self._attr_name = "Fan Mode"
@@ -110,10 +112,7 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 
     @property
     def available(self) -> bool:
-        mqtt_available = self.coordinator.mqtt_client.is_available()
-        service_running = self.coordinator.data.get("fan_control_running", False)
-        has_state = self._current_option is not None
-        return mqtt_available and service_running and has_state
+        return self.coordinator.mqtt_client.fan_available() and self._current_option is not None
 
     async def async_will_remove_from_hass(self) -> None:
         if self._unsubscribe:
@@ -135,7 +134,7 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
         if option == self._mode_managed:
             await self._publish_mode("unas_managed")
             try:
-                await self.coordinator.ssh_manager.kick_native_fan_control()
+                await self._ssh.kick_native_fan_control()
             except Exception as err:
                 _LOGGER.warning("Could not kick native fan control (non-critical): %s", err)
         elif option == MODE_CUSTOM_CURVE:
@@ -155,7 +154,7 @@ class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
 class UNASTempMetricSelect(FanModeMixin, CoordinatorEntity, SelectEntity, RestoreEntity):
     """Select entity for choosing temperature metric (max or average) for Target Temp mode."""
 
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, hass: HomeAssistant) -> None:
+    def __init__(self, coordinator: UNASDataCoordinator, hass: HomeAssistant) -> None:
         super().__init__(coordinator)
         self.hass = hass
         self._topics = get_mqtt_topics(coordinator.entry.entry_id)
@@ -217,11 +216,7 @@ class UNASTempMetricSelect(FanModeMixin, CoordinatorEntity, SelectEntity, Restor
 
     @property
     def available(self) -> bool:
-        mqtt_available = self.coordinator.mqtt_client.is_available()
-        service_running = self.coordinator.data.get("fan_control_running", False)
-        has_state = self._current_option is not None
-
-        if not (mqtt_available and service_running and has_state):
+        if not self.coordinator.mqtt_client.fan_available() or self._current_option is None:
             return False
 
         # Only available in Target Temp mode
@@ -258,7 +253,7 @@ class UNASTempMetricSelect(FanModeMixin, CoordinatorEntity, SelectEntity, Restor
 class UNASResponseSpeedSelect(FanModeMixin, CoordinatorEntity, SelectEntity, RestoreEntity):
     """Select entity for choosing fan response speed preset."""
 
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, hass: HomeAssistant) -> None:
+    def __init__(self, coordinator: UNASDataCoordinator, hass: HomeAssistant) -> None:
         super().__init__(coordinator)
         self.hass = hass
         self._topics = get_mqtt_topics(coordinator.entry.entry_id)
@@ -329,11 +324,7 @@ class UNASResponseSpeedSelect(FanModeMixin, CoordinatorEntity, SelectEntity, Res
 
     @property
     def available(self) -> bool:
-        mqtt_available = self.coordinator.mqtt_client.is_available()
-        service_running = self.coordinator.data.get("fan_control_running", False)
-        has_state = self._current_option is not None
-
-        if not (mqtt_available and service_running and has_state):
+        if not self.coordinator.mqtt_client.fan_available() or self._current_option is None:
             return False
 
         # Only available in Target Temp mode

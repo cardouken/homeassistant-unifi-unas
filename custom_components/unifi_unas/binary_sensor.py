@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
-from . import UNASDataUpdateCoordinator
+from . import UNASConfigEntry
 from .const import DOMAIN, get_device_info
+from .coordinator import UNASServiceCoordinator
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: UNASConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: UNASDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    coordinator = entry.runtime_data.service
 
     async_add_entities([
         UNASScriptsInstalledSensor(coordinator),
@@ -26,7 +26,7 @@ async def async_setup_entry(
 
 
 class UNASScriptsInstalledSensor(CoordinatorEntity, BinarySensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_has_entity_name = True
         self._attr_name = "Scripts Installed"
@@ -40,9 +40,9 @@ class UNASScriptsInstalledSensor(CoordinatorEntity, BinarySensorEntity):
             model=device_model,
         )
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        self.async_write_ha_state()
+    @property
+    def available(self) -> bool:
+        return self.coordinator.ready
 
     @property
     def is_on(self) -> bool:
@@ -50,7 +50,7 @@ class UNASScriptsInstalledSensor(CoordinatorEntity, BinarySensorEntity):
 
 
 class UNASMonitorRunningSensor(CoordinatorEntity, BinarySensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_has_entity_name = True
         self._attr_name = "Monitor Service"
@@ -64,9 +64,9 @@ class UNASMonitorRunningSensor(CoordinatorEntity, BinarySensorEntity):
             model=device_model,
         )
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        self.async_write_ha_state()
+    @property
+    def available(self) -> bool:
+        return self.coordinator.ready
 
     @property
     def is_on(self) -> bool:
@@ -74,7 +74,7 @@ class UNASMonitorRunningSensor(CoordinatorEntity, BinarySensorEntity):
 
 
 class UNASFanControlRunningSensor(CoordinatorEntity, BinarySensorEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_has_entity_name = True
         self._attr_name = "Fan Control Service"
@@ -88,9 +88,9 @@ class UNASFanControlRunningSensor(CoordinatorEntity, BinarySensorEntity):
             model=device_model,
         )
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        self.async_write_ha_state()
+    @property
+    def available(self) -> bool:
+        return self.coordinator.ready
 
     @property
     def is_on(self) -> bool:

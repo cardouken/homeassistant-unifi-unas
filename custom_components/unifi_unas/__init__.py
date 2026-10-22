@@ -2,21 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
-from datetime import timedelta
-from typing import Any
+from dataclasses import dataclass
 
-import asyncssh
-from packaging.version import Version, InvalidVersion
-
+from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.components import mqtt
+from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
-from homeassistant.loader import async_get_integration
 
 from .const import (
     DOMAIN,
@@ -36,14 +30,13 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_DEVICE_MODEL,
     DEFAULT_MQTT_PORT,
+    get_device_info,
     get_mqtt_root,
     get_mqtt_topics,
-    SSH_STATUS_INTERVAL,
-    LAST_CLEANUP_VERSION_KEY,
-    LAST_DEPLOY_VERSION_KEY,
 )
+from .coordinator import UNASDataCoordinator, UNASServiceCoordinator
+from .deploy import Deployer
 from .ssh_manager import BUNDLE_DIR, LEGACY_CLEANUP, SSHManager
-from .mqtt_client import UNASMQTTClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -55,13 +48,6 @@ PLATFORMS: list[Platform] = [
     Platform.NUMBER,
     Platform.SWITCH,
 ]
-
-SSH_UNAVAILABLE_THRESHOLD = 600
-PERFORM_MQTT_CLEANUP = True
-# entry ids unloaded by a reload (reconfigure, options change, manual reload); the
-# following setup pushes the current config into the on-device scripts. A plain
-# HA restart never unloads entries, so it does not redeploy.
-REDEPLOY_AFTER_RELOAD_KEY = f"{DOMAIN}_redeploy_after_reload"
 
 UNAS_UNINSTALL_COMMANDS = [
     "systemctl stop unas_monitor || true",
@@ -78,6 +64,17 @@ UNAS_UNINSTALL_COMMANDS = [
 ]
 
 
+@dataclass
+class UNASRuntime:
+    data: UNASDataCoordinator
+    service: UNASServiceCoordinator
+    deployer: Deployer
+    ssh: SSHManager
+
+
+type UNASConfigEntry = ConfigEntry[UNASRuntime]
+
+
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.version == 1:
         new_data = {**entry.data}
@@ -89,135 +86,6 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return True
 
     return True
-
-
-def _version_at_least(stored: str | None, target: str) -> bool:
-    if stored is None:
-        return False
-    try:
-        return Version(stored.replace("-dev", "")) >= Version(target.replace("-dev", ""))
-    except InvalidVersion:
-        return stored == target
-
-
-def _host_key_repair_id(entry_id: str) -> str:
-    return f"host_key_changed_{entry_id}"
-
-
-@callback
-def _raise_host_key_repair(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    ir.async_create_issue(
-        hass,
-        DOMAIN,
-        _host_key_repair_id(entry.entry_id),
-        is_fixable=True,
-        severity=ir.IssueSeverity.ERROR,
-        translation_key="host_key_changed",
-        translation_placeholders={"host": entry.data[CONF_HOST]},
-        data={"entry_id": entry.entry_id},
-    )
-
-
-def _record_host_key_pin(hass: HomeAssistant, entry: ConfigEntry, manager: SSHManager) -> None:
-    """Trust-on-first-use pin plus clearing the re-pin repair on a verified connection.
-
-    Called after *every* successful connection (initial setup and each
-    coordinator refresh), not just setup: if the NAS is unreachable at HA
-    boot, the coordinator's first successful reconnect still needs to pin
-    the key rather than leaving verification silently unpinned until the
-    next reload.
-    """
-    if (
-        entry.data.get(CONF_VERIFY_HOST_KEY)
-        and not entry.data.get(CONF_HOST_KEY)
-        and manager.server_host_key
-    ):
-        new_data = dict(entry.data)
-        new_data[CONF_HOST_KEY] = manager.server_host_key
-        hass.config_entries.async_update_entry(entry, data=new_data)
-        manager.pinned_host_key = manager.server_host_key
-        _LOGGER.info("Pinned SSH host key for %s", entry.data[CONF_HOST])
-
-    # We connected/verified, so clear any outstanding host-key repair.
-    ir.async_delete_issue(hass, DOMAIN, _host_key_repair_id(entry.entry_id))
-
-
-async def _cleanup_old_mqtt_configs_on_upgrade(
-    hass: HomeAssistant, entry: ConfigEntry
-) -> None:
-    if not PERFORM_MQTT_CLEANUP:
-        return
-
-    integration = await async_get_integration(hass, DOMAIN)
-    current_version = str(integration.version)
-    last_cleanup_version = entry.data.get(LAST_CLEANUP_VERSION_KEY)
-
-    if _version_at_least(last_cleanup_version, current_version):
-        return
-
-    _LOGGER.info(
-        "Integration upgraded from %s to %s - running MQTT config cleanup",
-        last_cleanup_version or "unknown",
-        current_version,
-    )
-
-    topics_to_clear = [
-        "unas_uptime",
-        "unas_os_version",
-        "unas_drive_version",
-        "unas_cpu_usage",
-        "unas_memory_used",
-        "unas_memory_total",
-        "unas_memory_usage",
-        "unas_cpu",
-        "unas_fan_speed",
-        "unas_fan_speed_percent",
-    ]
-
-    for i in range(1, 6):
-        topics_to_clear.extend(
-            [
-                f"unas_pool{i}_usage",
-                f"unas_pool{i}_size",
-                f"unas_pool{i}_used",
-                f"unas_pool{i}_available",
-            ]
-        )
-
-    for bay in range(1, 8):
-        topics_to_clear.extend(
-            [
-                f"unas_hdd_{bay}_temperature",
-                f"unas_hdd_{bay}_model",
-                f"unas_hdd_{bay}_serial",
-                f"unas_hdd_{bay}_rpm",
-                f"unas_hdd_{bay}_firmware",
-                f"unas_hdd_{bay}_status",
-                f"unas_hdd_{bay}_total_size",
-                f"unas_hdd_{bay}_power_hours",
-                f"unas_hdd_{bay}_bad_sectors",
-            ]
-        )
-
-    cleared_count = 0
-    for topic in topics_to_clear:
-        try:
-            await mqtt.async_publish(
-                hass,
-                f"homeassistant/sensor/{topic}/config",
-                "",
-                qos=0,
-                retain=True,
-            )
-            cleared_count += 1
-        except Exception as err:
-            _LOGGER.debug("Failed to clear MQTT config for %s: %s", topic, err)
-
-    _LOGGER.info("Cleared %d old MQTT auto-discovery configs", cleared_count)
-
-    new_data = dict(entry.data)
-    new_data[LAST_CLEANUP_VERSION_KEY] = current_version
-    hass.config_entries.async_update_entry(entry, data=new_data)
 
 
 def _build_ssh_manager(entry: ConfigEntry) -> SSHManager:
@@ -236,93 +104,34 @@ def _build_ssh_manager(entry: ConfigEntry) -> SSHManager:
     )
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    manager = _build_ssh_manager(entry)
-    redeploy_requested = entry.entry_id in hass.data.get(REDEPLOY_AFTER_RELOAD_KEY, set())
-    hass.data.get(REDEPLOY_AFTER_RELOAD_KEY, set()).discard(entry.entry_id)
+async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool:
+    if not await mqtt.async_wait_for_mqtt_client(hass):
+        raise ConfigEntryNotReady("The MQTT integration is not available")
+    # raised by 0.9.x and never cleared there
+    ir.async_delete_issue(hass, DOMAIN, "mqtt_missing")
 
-    integration = await async_get_integration(hass, DOMAIN)
-    current_version = str(integration.version)
-    last_deploy_version = entry.data.get(LAST_DEPLOY_VERSION_KEY)
-    is_dev_version = '-dev' in current_version
-    device_model = entry.data[CONF_DEVICE_MODEL]
-    is_existing_installation = last_deploy_version is not None
+    ssh = _build_ssh_manager(entry)
+    data = UNASDataCoordinator(hass, entry)
+    service = UNASServiceCoordinator(hass, entry, ssh)
+    deployer = Deployer(hass, entry, ssh, service)
+    entry.runtime_data = UNASRuntime(data, service, deployer, ssh)
 
-    ssh_connected = False
-    try:
-        await manager.connect()
-        ssh_connected = True
-        _LOGGER.info("SSH connection established to %s", entry.data[CONF_HOST])
+    await data.async_start()
 
-        _record_host_key_pin(hass, entry, manager)
-
-        mqtt_root = get_mqtt_topics(entry.entry_id)["root"]
-        _, outdated = await manager.bundle_status(device_model, mqtt_root)
-        if (
-            last_deploy_version != current_version
-            or outdated
-            or is_dev_version
-            or redeploy_requested
-        ):
-            await manager.deploy_scripts(device_model, mqtt_root)
-            new_data = dict(entry.data)
-            new_data[LAST_DEPLOY_VERSION_KEY] = current_version
-            hass.config_entries.async_update_entry(entry, data=new_data)
-
-    except asyncssh.HostKeyNotVerifiable as err:
-        # The presented key doesn't match the pin (or the pin is unreadable).
-        # Raise a repair the user can act on to re-pin, then degrade the same
-        # way any other SSH failure does: SSH is only used for script
-        # deploys/service status/backups, while all sensor data arrives over
-        # MQTT. On an existing install we keep those MQTT sensors running and
-        # only block a first-time setup.
-        _raise_host_key_repair(hass, entry)
-        if not is_existing_installation:
-            raise ConfigEntryError(
-                f"SSH host-key verification failed for {entry.data[CONF_HOST]}: {err}"
-            ) from err
-        _LOGGER.warning(
-            "SSH host-key verification failed for %s; continuing with MQTT data "
-            "only until the key is re-pinned via the repair: %s",
-            entry.data[CONF_HOST],
-            err,
-        )
-
-    except Exception as err:
-        if not is_existing_installation:
-            raise ConfigEntryNotReady(
-                f"Cannot connect to UNAS at {entry.data[CONF_HOST]} for initial setup: {err}"
-            ) from err
-        _LOGGER.warning(
-            "UNAS at %s is offline, will reconnect when available: %s",
-            entry.data[CONF_HOST],
-            err,
-        )
-
-    pending_script_deploy = not ssh_connected and (
-        last_deploy_version != current_version or is_dev_version or redeploy_requested
+    device_name, device_model = get_device_info(entry.data)
+    dr.async_get(hass).async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=device_name,
+        manufacturer="Ubiquiti",
+        model=device_model,
     )
 
-    mqtt_client_instance = UNASMQTTClient(hass, entry.entry_id)
-    coordinator = UNASDataUpdateCoordinator(hass, manager, mqtt_client_instance, entry, pending_script_deploy)
-    mqtt_client_instance._coordinator = coordinator
-
-    try:
-        await coordinator.async_config_entry_first_refresh()
-    except Exception:
-        await manager.disconnect()
-        raise
-
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
-        "coordinator": coordinator,
-        "ssh_manager": manager,
-        "mqtt_client": mqtt_client_instance,
-    }
-
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    await mqtt_client_instance.async_subscribe()
-    await _cleanup_old_mqtt_configs_on_upgrade(hass, entry)
+
+    # SSH never blocks setup, the MQTT entities work without it
+    entry.async_on_unload(service.async_add_listener(deployer.async_check))
+    entry.async_create_background_task(hass, service.async_refresh(), f"{DOMAIN} ssh status")
 
     topics = get_mqtt_topics(entry.entry_id)
     scan_interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
@@ -359,19 +168,13 @@ async def _clear_retained_mqtt_topics(hass: HomeAssistant, entry_id: str) -> Non
         _LOGGER.debug("Failed to clear retained MQTT topics for %s", mqtt_root)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool:
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        data = hass.data[DOMAIN].pop(entry.entry_id)
-        await data["mqtt_client"].async_unsubscribe()
-        await data["ssh_manager"].disconnect()
-        hass.data.setdefault(REDEPLOY_AFTER_RELOAD_KEY, set()).add(entry.entry_id)
-
+        await entry.runtime_data.ssh.disconnect()
     return unload_ok
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    hass.data.get(REDEPLOY_AFTER_RELOAD_KEY, set()).discard(entry.entry_id)
-
     manager = _build_ssh_manager(entry)
     try:
         for command in UNAS_UNINSTALL_COMMANDS:
@@ -384,219 +187,3 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
     # daemons first, their offline messages would be retained again
     await _clear_retained_mqtt_topics(hass, entry.entry_id)
-
-
-class UNASDataUpdateCoordinator(DataUpdateCoordinator):
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        ssh_manager: SSHManager,
-        mqtt_client: UNASMQTTClient,
-        entry: ConfigEntry,
-        pending_script_deploy: bool = False,
-    ) -> None:
-        self.ssh_manager = ssh_manager
-        self.mqtt_client = mqtt_client
-        self.entry = entry
-        self.pending_script_deploy = pending_script_deploy
-        self.ssh_failed_since: float | None = None
-        self.discovered_bays: set[str] = set()
-        self.discovered_nvmes: set[str] = set()
-        self.discovered_pools: set[str] = set()
-        self.discovered_shares: set[str] = set()
-        self.discovered_backup_task_sensors: set[str] = set()
-        self.discovered_backup_task_buttons: set[str] = set()
-        self.discovered_backup_task_switches: set[str] = set()
-        self.sensor_add_entities = None
-        self.button_add_entities = None
-        self.switch_add_entities = None
-        self._ssh_status: dict[str, Any] = {}
-        self._ssh_checked_at: float | None = None
-
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=timedelta(seconds=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)),
-        )
-
-    async def _async_update_data(self):
-        if mqtt.DOMAIN not in self.hass.data:
-            _LOGGER.error("MQTT integration removed - UNAS Pro requires MQTT")
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                "mqtt_missing",
-                is_fixable=False,
-                severity=ir.IssueSeverity.ERROR,
-                translation_key="mqtt_missing",
-            )
-            raise UpdateFailed("MQTT integration is required but not found")
-
-        recent_machine_ids = self.mqtt_client.get_recent_machine_ids()
-        duplicate_issue_id = f"duplicate_publishers_{self.entry.entry_id}"
-        if len(recent_machine_ids) > 1:
-            _LOGGER.warning(
-                "Multiple devices publishing to the same MQTT topic: %s",
-                ", ".join(sorted(recent_machine_ids)),
-            )
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                duplicate_issue_id,
-                is_fixable=False,
-                severity=ir.IssueSeverity.WARNING,
-                translation_key="duplicate_publishers",
-                translation_placeholders={
-                    "machine_ids": ", ".join(sorted(recent_machine_ids)),
-                },
-            )
-        else:
-            ir.async_delete_issue(self.hass, DOMAIN, duplicate_issue_id)
-
-        data = {
-            "scripts_installed": False,
-            "ssh_connected": False,
-            "monitor_running": False,
-            "fan_control_running": False,
-            "mqtt_data": self.mqtt_client.get_data(),
-        }
-
-        now = time.monotonic()
-        ssh_due = (
-            self._ssh_checked_at is None
-            or self.pending_script_deploy
-            or now - self._ssh_checked_at >= SSH_STATUS_INTERVAL
-        )
-        if ssh_due:
-            self._ssh_checked_at = now
-            await self._async_update_ssh_status(data)
-            self._ssh_status = {
-                key: data[key]
-                for key in (
-                    "scripts_installed",
-                    "ssh_connected",
-                    "monitor_running",
-                    "fan_control_running",
-                    "backup_tasks",
-                )
-                if key in data
-            }
-        else:
-            data.update(self._ssh_status)
-
-        try:
-            if self.sensor_add_entities is not None:
-                from .sensor import (
-                    _discover_and_add_drive_sensors,
-                    _discover_and_add_nvme_sensors,
-                    _discover_and_add_pool_sensors,
-                    _discover_and_add_share_sensors,
-                    _discover_and_add_backup_sensors,
-                )
-                await _discover_and_add_drive_sensors(self, self.sensor_add_entities)
-                await _discover_and_add_nvme_sensors(self, self.sensor_add_entities)
-                await _discover_and_add_pool_sensors(self, self.sensor_add_entities)
-                await _discover_and_add_share_sensors(self, self.sensor_add_entities)
-                await _discover_and_add_backup_sensors(self, self.sensor_add_entities)
-
-            if self.button_add_entities is not None:
-                from .button import _discover_and_add_backup_buttons
-                await _discover_and_add_backup_buttons(self, self.button_add_entities)
-
-            if self.switch_add_entities is not None:
-                from .switch import _discover_and_add_backup_switches
-                await _discover_and_add_backup_switches(self, self.switch_add_entities)
-        except Exception as err:
-            _LOGGER.error("Error during entity discovery: %s", err)
-
-        return data
-
-    async def _async_update_ssh_status(self, data: dict[str, Any]) -> None:
-        try:
-            device_model = self.entry.data[CONF_DEVICE_MODEL]
-            mqtt_root = get_mqtt_topics(self.entry.entry_id)["root"]
-            status, outdated = await self.ssh_manager.bundle_status(device_model, mqtt_root)
-
-            if outdated or self.pending_script_deploy:
-                reason = f"outdated ({', '.join(outdated)})" if outdated else "pending upgrade"
-                _LOGGER.info("Scripts %s, deploying...", reason)
-                await self.ssh_manager.deploy_scripts(device_model, mqtt_root)
-                self.pending_script_deploy = False
-                integration = await async_get_integration(self.hass, DOMAIN)
-                new_data = dict(self.entry.data)
-                new_data[LAST_DEPLOY_VERSION_KEY] = str(integration.version)
-                self.hass.config_entries.async_update_entry(self.entry, data=new_data)
-                status, outdated = await self.ssh_manager.bundle_status(device_model, mqtt_root)
-
-            _record_host_key_pin(self.hass, self.entry, self.ssh_manager)
-
-            services = status.get("services") or {}
-            data.update({
-                "scripts_installed": not outdated,
-                "ssh_connected": True,
-                "monitor_running": services.get("unas_monitor") == "active",
-                "fan_control_running": services.get("fan_control") == "active",
-            })
-
-            if self.ssh_failed_since is not None:
-                _LOGGER.info("SSH connection restored to %s", self.entry.data[CONF_HOST])
-                self.ssh_failed_since = None
-            ssh_issue_id = f"ssh_unavailable_{self.entry.entry_id}"
-            ir.async_delete_issue(self.hass, DOMAIN, ssh_issue_id)
-
-            if status.get("backup_tasks") is not None:
-                data["backup_tasks"] = status["backup_tasks"]
-            else:
-                _LOGGER.debug("Could not fetch backup tasks: %s", status.get("backup_error"))
-                data["backup_tasks"] = self._ssh_status.get("backup_tasks", [])
-
-        except asyncssh.HostKeyNotVerifiable as err:
-            # A host-key mismatch (or unreadable pin) after setup. Raise the
-            # re-pin repair immediately rather than waiting for a restart,
-            # and don't count this towards the ssh_unavailable threshold --
-            # it isn't a transient outage, it's an actionable security event
-            # that will recur every refresh until the key is re-pinned.
-            _LOGGER.warning(
-                "SSH host-key verification failed for %s; MQTT sensors "
-                "continue but SSH-backed features are unavailable until "
-                "the key is re-pinned: %s",
-                self.entry.data[CONF_HOST],
-                err,
-            )
-            _raise_host_key_repair(self.hass, self.entry)
-
-        except Exception as err:
-            _LOGGER.warning("SSH connection temporarily unavailable: %s", err)
-            now = time.time()
-            if self.ssh_failed_since is None:
-                self.ssh_failed_since = now
-            elif now - self.ssh_failed_since > SSH_UNAVAILABLE_THRESHOLD:
-                ssh_issue_id = f"ssh_unavailable_{self.entry.entry_id}"
-                ir.async_create_issue(
-                    self.hass,
-                    DOMAIN,
-                    ssh_issue_id,
-                    is_fixable=False,
-                    severity=ir.IssueSeverity.WARNING,
-                    translation_key="ssh_unavailable",
-                    translation_placeholders={
-                        "host": self.entry.data[CONF_HOST],
-                    },
-                )
-
-    def find_backup_task(self, task_id: str):
-        for task in self.data.get("backup_tasks", []):
-            if task["id"] == task_id:
-                return task
-        return None
-
-    async def async_reinstall_scripts(self) -> None:
-        device_model = self.entry.data[CONF_DEVICE_MODEL]
-        mqtt_root = get_mqtt_topics(self.entry.entry_id)["root"]
-        await self.ssh_manager.deploy_scripts(device_model, mqtt_root)
-        await self.async_refresh_ssh_status()
-
-    async def async_refresh_ssh_status(self) -> None:
-        self._ssh_checked_at = None
-        await self.async_request_refresh()

@@ -3,40 +3,46 @@ from __future__ import annotations
 import logging
 
 from homeassistant.components.button import ButtonEntity
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.device_registry import DeviceInfo
 
-from . import UNASDataUpdateCoordinator
+from . import UNASConfigEntry
 from .const import DOMAIN, get_backup_device_info, get_device_info
+from .coordinator import UNASServiceCoordinator
+from .deploy import Deployer
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: UNASConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    coordinator: UNASDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id][
-        "coordinator"
-    ]
+    coordinator = entry.runtime_data.service
 
     async_add_entities([
-        UNASReinstallScriptsButton(coordinator),
+        UNASReinstallScriptsButton(coordinator, entry.runtime_data.deployer),
         UNASRebootButton(coordinator),
         UNASShutdownButton(coordinator),
     ])
 
-    coordinator.button_add_entities = async_add_entities
+    @callback
+    def _discover() -> None:
+        entry.async_create_background_task(
+            hass, _discover_and_add_backup_buttons(coordinator, async_add_entities), f"{DOMAIN} discovery"
+        )
+
+    entry.async_on_unload(coordinator.async_add_listener(_discover))
 
 
 class UNASReinstallScriptsButton(CoordinatorEntity, ButtonEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, deployer: Deployer) -> None:
         super().__init__(coordinator)
+        self._deployer = deployer
         self._attr_has_entity_name = True
         self._attr_name = "Reinstall Scripts"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_reinstall_scripts"
@@ -51,14 +57,14 @@ class UNASReinstallScriptsButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self.coordinator.data.get("ssh_connected", False)
+        return self.coordinator.ready
 
     async def async_press(self) -> None:
-        await self.coordinator.async_reinstall_scripts()
+        self._deployer.async_reinstall()
 
 
 class UNASRebootButton(CoordinatorEntity, ButtonEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_has_entity_name = True
         self._attr_name = "Reboot"
@@ -74,14 +80,14 @@ class UNASRebootButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self.coordinator.data.get("ssh_connected", False)
+        return self.coordinator.ready
 
     async def async_press(self) -> None:
         await self.coordinator.ssh_manager.execute_command("reboot")
 
 
 class UNASShutdownButton(CoordinatorEntity, ButtonEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_has_entity_name = True
         self._attr_name = "Shutdown"
@@ -97,19 +103,21 @@ class UNASShutdownButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.last_update_success and self.coordinator.data.get("ssh_connected", False)
+        return self.coordinator.ready
 
     async def async_press(self) -> None:
         await self.coordinator.ssh_manager.execute_command("shutdown -h now")
 
 
 async def _discover_and_add_backup_buttons(
-        coordinator: UNASDataUpdateCoordinator,
+        coordinator: UNASServiceCoordinator,
         async_add_entities: AddEntitiesCallback,
 ) -> None:
     from homeassistant.helpers import entity_registry as er
 
-    backup_tasks = coordinator.data.get("backup_tasks", [])
+    if coordinator.data is None:
+        return
+    backup_tasks = coordinator.data["backup_tasks"]
     task_ids = {task["id"] for task in backup_tasks}
 
     entity_reg = er.async_get(coordinator.hass)
@@ -152,7 +160,7 @@ async def _discover_and_add_backup_buttons(
 
 
 class UNASBackupTriggerButton(CoordinatorEntity, ButtonEntity):
-    def __init__(self, coordinator: UNASDataUpdateCoordinator, task: dict) -> None:
+    def __init__(self, coordinator: UNASServiceCoordinator, task: dict) -> None:
         super().__init__(coordinator)
         self._task_id = task["id"]
         self._task_name = task["name"]
@@ -164,16 +172,11 @@ class UNASBackupTriggerButton(CoordinatorEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        if not self.coordinator.last_update_success:
-            return False
-        if not self.coordinator.data.get("ssh_connected", False):
-            return False
-        backup_tasks = self.coordinator.data.get("backup_tasks", [])
-        return any(task["id"] == self._task_id for task in backup_tasks)
+        return self.coordinator.ready and self.coordinator.find_backup_task(self._task_id) is not None
 
     async def async_press(self) -> None:
         try:
             await self.coordinator.ssh_manager.run_backup(self._task_id)
         except Exception as err:
             raise HomeAssistantError(f"Failed to trigger backup: {err}") from err
-        await self.coordinator.async_refresh_ssh_status()
+        await self.coordinator.async_request_refresh()
