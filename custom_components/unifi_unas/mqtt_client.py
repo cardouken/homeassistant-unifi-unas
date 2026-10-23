@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 from datetime import datetime, timedelta
@@ -26,6 +27,7 @@ Topic Pattern                        → Internal Key                   → Type
 ─────────────────────────────────────────────────────────────────────────────────
 unas/availability                    → _status                        → status
 unas/fan/availability                → _fan_status                    → status
+unas/inventory                       → inventory                      → {bays, nvme, pools, shares}
 unas/system/{metric}                 → unas_{metric}                  → value
 unas/hdd/{bay}/{metric}              → unas_hdd_{bay}_{metric}        → value
 unas/nvme/{slot}/{metric}            → unas_nvme_{slot}_{metric}      → value
@@ -48,6 +50,15 @@ Examples:
 
 
 MACHINE_ID_WINDOW_SECONDS = 120
+# the monitor republishes every value at least once a minute or two
+STALE_AFTER = timedelta(minutes=5)
+# for monitors older than the inventory topic
+ITEM_KEYS = {
+    "bays": re.compile(r"unas_hdd_(.+)_temperature"),
+    "nvme": re.compile(r"unas_nvme_(.+)_temperature"),
+    "pools": re.compile(r"unas_pool(\d+)_usage"),
+    "shares": re.compile(r"unas_share_(.+)_usage"),
+}
 
 
 class UNASMQTTClient:
@@ -63,6 +74,8 @@ class UNASMQTTClient:
         self._fan_status: str | None = None
         self._last_update: datetime | None = None
         self._recent_machine_ids: dict[str, datetime] = {}
+        self.inventory: dict[str, list[str] | None] | None = None
+        self.topics: set[str] = set()
         self.received = asyncio.Event()
 
     async def async_subscribe(self) -> None:
@@ -94,6 +107,10 @@ class UNASMQTTClient:
         if not topic.startswith(self.mqtt_root):
             return
         self.received.set()
+        if msg.payload:
+            self.topics.add(topic)
+        else:
+            self.topics.discard(topic)
         
         parts = topic[len(self.mqtt_root):].lstrip("/").split("/")
         if not parts:
@@ -111,7 +128,9 @@ class UNASMQTTClient:
             self._handle_four_part(parts, msg.payload)
 
     def _handle_one_part(self, parts, payload):
-        if parts[0] == "availability":
+        if parts[0] == "inventory":
+            self._store_inventory(payload)
+        elif parts[0] == "availability":
             self._status = payload
             _LOGGER.debug("UNAS status: %s", self._status)
             if payload == "online":
@@ -177,8 +196,31 @@ class UNASMQTTClient:
             param = parts[3]
             self._store_value(f"fan_curve_{param}", payload)
 
+    def _store_inventory(self, payload: str) -> None:
+        try:
+            inventory = json.loads(payload) if payload else None
+        except json.JSONDecodeError:
+            _LOGGER.warning("Ignoring an invalid inventory: %s", payload[:200])
+            return
+        if isinstance(inventory, dict):
+            # None means that source failed this cycle
+            self.inventory = {
+                category: None if items is None else [str(item) for item in items]
+                for category, items in inventory.items()
+                if items is None or isinstance(items, list)
+            }
+        elif inventory is None:
+            self.inventory = None
+        else:
+            return
+        self._schedule_refresh()
+
     def _store_value(self, key: str, payload: str) -> None:
         if not payload:
+            # an emptied retained topic
+            if self._data.pop(key, None) is not None:
+                self._data_timestamps.pop(key, None)
+                self._schedule_refresh()
             return
 
         value: str | int | float = payload
@@ -199,6 +241,9 @@ class UNASMQTTClient:
         self._schedule_refresh()
 
     def _store_attributes(self, key: str, payload: str) -> None:
+        if not payload:
+            self._store_value(f"{key}_attributes", payload)
+            return
         try:
             self._data[f"{key}_attributes"] = json.loads(payload)
             self._data_timestamps[f"{key}_attributes"] = datetime.now()
@@ -219,6 +264,11 @@ class UNASMQTTClient:
 
         return False
 
+    def is_fresh(self, key: str) -> bool:
+        # a section of the monitor that keeps failing stops refreshing its values
+        received = self._data_timestamps.get(key)
+        return received is not None and datetime.now() - received <= STALE_AFTER
+
     def fan_available(self) -> bool:
         # an older fan daemon never publishes fan/availability, follow the monitor then
         if self._fan_status is None:
@@ -226,8 +276,19 @@ class UNASMQTTClient:
         return self._fan_status == "online"
 
     def get_data(self) -> dict[str, Any]:
-        self._cleanup_stale_data()
         return self._data.copy()
+
+    def items(self, category: str) -> tuple[set[str], bool]:
+        # (items, whether the list is authoritative enough to remove what is missing)
+        listed = (self.inventory or {}).get(category)
+        if listed is not None:
+            return set(listed), self._status == "online"
+        pattern = ITEM_KEYS[category]
+        return {match.group(1) for key in self._data if (match := pattern.fullmatch(key))}, False
+
+    def listed(self, category: str, item: str) -> bool:
+        listed = (self.inventory or {}).get(category)
+        return listed is None or item in listed
 
     def get_recent_machine_ids(self) -> set[str]:
         cutoff = datetime.now() - timedelta(seconds=MACHINE_ID_WINDOW_SECONDS)
@@ -235,18 +296,3 @@ class UNASMQTTClient:
             mid: ts for mid, ts in self._recent_machine_ids.items() if ts > cutoff
         }
         return set(self._recent_machine_ids.keys())
-
-    def _cleanup_stale_data(self) -> None:
-        now = datetime.now()
-        stale_keys = []
-        
-        for key, timestamp in self._data_timestamps.items():
-            if key.startswith(("fan_curve_", "fan_mode", "monitor_interval")):
-                continue
-            
-            if (now - timestamp).total_seconds() > 120:
-                stale_keys.append(key)
-        
-        for key in stale_keys:
-            del self._data[key]
-            del self._data_timestamps[key]

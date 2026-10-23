@@ -23,62 +23,12 @@ async def async_setup_entry(
     coordinator = entry.runtime_data.service
 
     @callback
-    def _discover() -> None:
-        entry.async_create_background_task(
-            hass, _discover_and_add_backup_switches(coordinator, async_add_entities), f"{DOMAIN} discovery"
+    def add_backups(task_ids: list[str]) -> None:
+        async_add_entities(
+            BackupScheduleSwitch(coordinator, coordinator.find_backup_task(task_id)) for task_id in task_ids
         )
 
-    entry.async_on_unload(coordinator.async_add_listener(_discover))
-
-
-async def _discover_and_add_backup_switches(
-        coordinator: UNASServiceCoordinator,
-        async_add_entities: AddEntitiesCallback,
-) -> None:
-    from homeassistant.helpers import entity_registry as er
-
-    if coordinator.data is None:
-        return
-    backup_tasks = coordinator.data["backup_tasks"]
-    task_ids = {task["id"] for task in backup_tasks}
-
-    entity_reg = er.async_get(coordinator.hass)
-    entry_id = coordinator.entry.entry_id
-
-    missing_tasks = coordinator.discovered_backup_task_switches - task_ids
-    if missing_tasks:
-        coordinator.discovered_backup_task_switches -= missing_tasks
-        for task_id in missing_tasks:
-            unique_id = f"{entry_id}_backup_{task_id}_schedule_enabled"
-            if entity_id := entity_reg.async_get_entity_id("switch", DOMAIN, unique_id):
-                entity_reg.async_remove(entity_id)
-
-    # clean up orphaned entities
-    prefix = f"{entry_id}_backup_"
-    suffix = "_schedule_enabled"
-    for entity in er.async_entries_for_config_entry(entity_reg, entry_id):
-        if entity.domain != "switch" or not entity.unique_id.startswith(prefix):
-            continue
-        if not entity.unique_id.endswith(suffix):
-            continue
-        task_id = entity.unique_id[len(prefix):-len(suffix)]
-        if task_id not in task_ids:
-            entity_reg.async_remove(entity.entity_id)
-            _LOGGER.info("Removed orphaned backup switch %s", entity.entity_id)
-
-    new_tasks = task_ids - coordinator.discovered_backup_task_switches
-    if not new_tasks:
-        return
-
-    entities = []
-    for task in backup_tasks:
-        if task["id"] in new_tasks:
-            entities.append(BackupScheduleSwitch(coordinator, task))
-
-    if entities:
-        async_add_entities(entities)
-        coordinator.discovered_backup_task_switches.update(new_tasks)
-        _LOGGER.info("Added %d backup schedule switches", len(entities))
+    entry.runtime_data.reconciler.register("backups", add_backups)
 
 
 class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):

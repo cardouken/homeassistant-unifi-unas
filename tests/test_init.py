@@ -8,6 +8,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
+from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
 from conftest import DOMAIN, ENTRY_ID, TASK, fire, fire_fan_settings, fire_monitor_cycle, settle, setup_entry
 
@@ -206,6 +207,22 @@ async def test_ssh_down_at_startup_keeps_backup_entities(hass, mqtt_mock, ssh):
     entity_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, status_uid)
     assert entity_id
     assert hass.states.get(entity_id).state == "unavailable"
+
+
+async def test_values_a_failing_monitor_section_stops_sending_go_unavailable(
+        hass, mqtt_mock, ssh, freezer
+):
+    await setup_entry(hass)
+    fire_monitor_cycle(hass)
+    await settle(hass)
+    for _ in range(11):
+        # only the system section keeps reporting
+        freezer.tick(timedelta(seconds=30))
+        fire(hass, "system/cpu_temp", 51)
+        async_fire_time_changed(hass)
+        await hass.async_block_till_done()
+    assert state(hass, "sensor", "unas_cpu_temp") == "51"
+    assert state(hass, "sensor", "unas_hdd_1_temperature") == "unavailable"
 
 
 async def test_update_entity_on_a_pushed_entity(hass, mqtt_mock, ssh, caplog):

@@ -279,212 +279,55 @@ async def async_setup_entry(
 
     async_add_entities(entities)
 
-    async def discover_storage():
-        await _discover_and_add_drive_sensors(coordinator, async_add_entities)
-        await _discover_and_add_nvme_sensors(coordinator, async_add_entities)
-        await _discover_and_add_pool_sensors(coordinator, async_add_entities)
-        await _discover_and_add_share_sensors(coordinator, async_add_entities)
-
     @callback
-    def _discover_storage() -> None:
-        entry.async_create_background_task(hass, discover_storage(), f"{DOMAIN} discovery")
-
-    @callback
-    def _discover_backups() -> None:
-        entry.async_create_background_task(
-            hass, _discover_and_add_backup_sensors(service, async_add_entities), f"{DOMAIN} discovery"
+    def add_bays(bays: list[str]) -> None:
+        async_add_entities(
+            UNASDriveSensor(coordinator, f"unas_hdd_{bay}_{suffix}", name, bay, *rest)
+            for bay in bays
+            for suffix, name, *rest in DRIVE_SENSORS
         )
 
-    entry.async_on_unload(coordinator.async_add_listener(_discover_storage))
-    entry.async_on_unload(service.async_add_listener(_discover_backups))
-    _discover_storage()
+    @callback
+    def add_nvmes(slots: list[str]) -> None:
+        async_add_entities(
+            UNASNVMeSensor(coordinator, f"unas_nvme_{slot}_{suffix}", name, slot, *rest)
+            for slot in slots
+            for suffix, name, *rest in NVME_SENSORS
+        )
 
-
-async def _discover_and_add_drive_sensors(
-        coordinator: UNASDataCoordinator,
-        async_add_entities: AddEntitiesCallback,
-) -> None:
-    from homeassistant.helpers import entity_registry as er, device_registry as dr
-    from homeassistant.components import mqtt
-    
-    mqtt_data = coordinator.mqtt_client.get_data()
-    detected_bays = {key.split("_")[2] for key in mqtt_data.keys() if
-                     key.startswith("unas_hdd_") and "_temperature" in key}
-
-    missing_bays = coordinator.discovered_bays - detected_bays
-    if missing_bays:
-        _LOGGER.info("Drives no longer detected in bays: %s", sorted(missing_bays))
-        coordinator.discovered_bays -= missing_bays
-        
-        entity_reg = er.async_get(coordinator.hass)
-        device_reg = dr.async_get(coordinator.hass)
-        
-        mqtt_root = coordinator.mqtt_client.mqtt_root
-        
-        for bay in missing_bays:
-            for sensor_suffix, _, _, _, _, _ in DRIVE_SENSORS:
-                unique_id = f"{coordinator.entry.entry_id}_unas_hdd_{bay}_{sensor_suffix}"
-                if entity_id := entity_reg.async_get_entity_id("sensor", DOMAIN, unique_id):
-                    entity_reg.async_remove(entity_id)
-                    _LOGGER.debug("Removed entity %s", entity_id)
-                
-                await mqtt.async_publish(
-                    coordinator.hass,
-                    f"{mqtt_root}/hdd/{bay}/{sensor_suffix}",
-                    "",
-                    qos=0,
-                    retain=True,
-                )
-            
-            device_id = (DOMAIN, f"{coordinator.entry.entry_id}_hdd_{bay}")
-            if device := device_reg.async_get_device(identifiers={device_id}):
-                device_reg.async_remove_device(device.id)
-                _LOGGER.info("Removed device for HDD bay %s", bay)
-
-    new_bays = detected_bays - coordinator.discovered_bays
-    if not new_bays:
-        return
-
-    _LOGGER.debug("Discovered new drive bays: %s", sorted(new_bays))
-
-    entities = []
-    for bay_num in sorted(new_bays):
-        for sensor_suffix, name, unit, device_class, state_class, icon in DRIVE_SENSORS:
-            mqtt_key = f"unas_hdd_{bay_num}_{sensor_suffix}"
-            entities.append(
-                UNASDriveSensor(coordinator, mqtt_key, name, bay_num, unit, device_class, state_class, icon))
-
-    if entities:
-        async_add_entities(entities)
-        coordinator.discovered_bays.update(new_bays)
-        _LOGGER.info("Added %d sensors for %d new drives", len(entities), len(new_bays))
-
-
-async def _discover_and_add_nvme_sensors(
-        coordinator: UNASDataCoordinator,
-        async_add_entities: AddEntitiesCallback,
-) -> None:
-    from homeassistant.helpers import entity_registry as er, device_registry as dr
-    from homeassistant.components import mqtt
-    
-    mqtt_data = coordinator.mqtt_client.get_data()
-    detected_nvmes = {key.split("_")[2] for key in mqtt_data.keys() if
-                      key.startswith("unas_nvme_") and "_temperature" in key}
-
-    missing_nvmes = coordinator.discovered_nvmes - detected_nvmes
-    if missing_nvmes:
-        _LOGGER.info("NVMe drives no longer detected in slots: %s", sorted(missing_nvmes))
-        coordinator.discovered_nvmes -= missing_nvmes
-        
-        entity_reg = er.async_get(coordinator.hass)
-        device_reg = dr.async_get(coordinator.hass)
-        
-        mqtt_root = coordinator.mqtt_client.mqtt_root
-        
-        for slot in missing_nvmes:
-            for sensor_suffix, _, _, _, _, _ in NVME_SENSORS:
-                unique_id = f"{coordinator.entry.entry_id}_unas_nvme_{slot}_{sensor_suffix}"
-                if entity_id := entity_reg.async_get_entity_id("sensor", DOMAIN, unique_id):
-                    entity_reg.async_remove(entity_id)
-                    _LOGGER.debug("Removed entity %s", entity_id)
-                
-                await mqtt.async_publish(
-                    coordinator.hass,
-                    f"{mqtt_root}/nvme/{slot}/{sensor_suffix}",
-                    "",
-                    qos=0,
-                    retain=True,
-                )
-            
-            device_id = (DOMAIN, f"{coordinator.entry.entry_id}_nvme_{slot}")
-            if device := device_reg.async_get_device(identifiers={device_id}):
-                device_reg.async_remove_device(device.id)
-                _LOGGER.info("Removed device for NVMe slot %s", slot)
-
-    new_nvmes = detected_nvmes - coordinator.discovered_nvmes
-    if not new_nvmes:
-        return
-
-    _LOGGER.debug("Discovered new NVMe drives: %s", sorted(new_nvmes))
-
-    entities = []
-    for nvme_slot in sorted(new_nvmes):
-        for sensor_suffix, name, unit, device_class, state_class, icon in NVME_SENSORS:
-            mqtt_key = f"unas_nvme_{nvme_slot}_{sensor_suffix}"
-            entities.append(
-                UNASNVMeSensor(coordinator, mqtt_key, name, nvme_slot, unit, device_class, state_class, icon))
-
-    if entities:
-        async_add_entities(entities)
-        coordinator.discovered_nvmes.update(new_nvmes)
-        _LOGGER.info("Added %d sensors for %d new NVMe drives", len(entities), len(new_nvmes))
-
-
-async def _discover_and_add_pool_sensors(
-        coordinator: UNASDataCoordinator,
-        async_add_entities: AddEntitiesCallback,
-) -> None:
-    from homeassistant.helpers import entity_registry as er
-    from homeassistant.components import mqtt
-    
-    mqtt_data = coordinator.mqtt_client.get_data()
-    pool_pattern = re.compile(r"^unas_pool(\d+)_usage$")
-    detected_pools = set()
-    for key in mqtt_data.keys():
-        if match := pool_pattern.match(key):
-            detected_pools.add(match.group(1))
-
-    missing_pools = coordinator.discovered_pools - detected_pools
-    if missing_pools:
-        _LOGGER.info("Storage pools no longer detected: %s", sorted(missing_pools))
-        coordinator.discovered_pools -= missing_pools
-        
-        entity_reg = er.async_get(coordinator.hass)
-        mqtt_root = coordinator.mqtt_client.mqtt_root
-        
-        for pool_num in missing_pools:
-            for sensor_suffix, _, _, _, _, _ in STORAGE_POOL_SENSORS:
-                unique_id = f"{coordinator.entry.entry_id}_unas_pool{pool_num}_{sensor_suffix}"
-                if entity_id := entity_reg.async_get_entity_id("sensor", DOMAIN, unique_id):
-                    entity_reg.async_remove(entity_id)
-                    _LOGGER.debug("Removed entity %s", entity_id)
-
-                await mqtt.async_publish(
-                    coordinator.hass,
-                    f"{mqtt_root}/pool/{pool_num}/{sensor_suffix}",
-                    "",
-                    qos=0,
-                    retain=True,
-                )
-            # clear protection topic (attribute-only, no sensor)
-            await mqtt.async_publish(
-                coordinator.hass,
-                f"{mqtt_root}/pool/{pool_num}/protection",
-                "",
-                qos=0,
-                retain=True,
+    @callback
+    def add_pools(pools: list[str]) -> None:
+        async_add_entities(
+            UNASSensor(
+                coordinator, f"unas_pool{pool}_{suffix}", f"Storage Pool {pool} {name}", *rest,
+                item=("pools", pool),
             )
-        
-        _LOGGER.info("Removed entities for %d pools", len(missing_pools))
+            for pool in pools
+            for suffix, name, *rest in STORAGE_POOL_SENSORS
+        )
 
-    new_pools = detected_pools - coordinator.discovered_pools
-    if not new_pools:
-        return
+    @callback
+    def add_shares(shares: list[str]) -> None:
+        async_add_entities(
+            UNASShareSensor(coordinator, share, suffix, name, *rest)
+            for share in shares
+            for suffix, name, *rest in SHARE_SENSORS
+        )
 
-    _LOGGER.debug("Discovered new storage pools: %s", sorted(new_pools))
-
-    entities = []
-    for pool_num in sorted(new_pools):
-        for sensor_suffix, name, unit, device_class, state_class, icon in STORAGE_POOL_SENSORS:
-            mqtt_key = f"unas_pool{pool_num}_{sensor_suffix}"
-            full_name = f"Storage Pool {pool_num} {name}"
-            entities.append(
-                UNASSensor(coordinator, mqtt_key, full_name, unit, device_class, state_class, icon))
-
-    if entities:
+    @callback
+    def add_backups(task_ids: list[str]) -> None:
+        entities = []
+        for task_id in task_ids:
+            task = service.find_backup_task(task_id)
+            entities.extend(sensor(service, task) for sensor in BACKUP_SENSORS)
         async_add_entities(entities)
-        coordinator.discovered_pools.update(new_pools)
-        _LOGGER.info("Added %d sensors for %d new pools", len(entities), len(new_pools))
+
+    reconciler = entry.runtime_data.reconciler
+    reconciler.register("bays", add_bays)
+    reconciler.register("nvme", add_nvmes)
+    reconciler.register("pools", add_pools)
+    reconciler.register("shares", add_shares)
+    reconciler.register("backups", add_backups)
 
 
 class UNASSensor(CoordinatorEntity, SensorEntity):
@@ -497,9 +340,11 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
             device_class: SensorDeviceClass | None,
             state_class: SensorStateClass | None,
             icon: str | None,
+            item: tuple[str, str] | None = None,
     ) -> None:
         super().__init__(coordinator)
         self._mqtt_key = mqtt_key
+        self._item = item
         self._last_uptime_raw = None
         self._boot_timestamp = None
         self._attr_has_entity_name = True
@@ -541,9 +386,10 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        if not self.coordinator.mqtt_client.is_available():
+        client = self.coordinator.mqtt_client
+        if not client.is_available() or (self._item and not client.listed(*self._item)):
             return False
-        return self._mqtt_key in self.coordinator.data
+        return self._mqtt_key in self.coordinator.data and client.is_fresh(self._mqtt_key)
 
     @property
     def native_value(self):
@@ -693,10 +539,11 @@ class UNASNVMeSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        if not self.coordinator.mqtt_client.is_available():
+        client = self.coordinator.mqtt_client
+        if not client.is_available() or not client.listed("nvme", self._nvme_slot):
             return False
         mqtt_data = self.coordinator.data
-        return self._mqtt_key in mqtt_data
+        return self._mqtt_key in mqtt_data and client.is_fresh(self._mqtt_key)
 
     @property
     def native_value(self):
@@ -752,10 +599,11 @@ class UNASDriveSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        if not self.coordinator.mqtt_client.is_available():
+        client = self.coordinator.mqtt_client
+        if not client.is_available() or not client.listed("bays", self._bay_num):
             return False
         mqtt_data = self.coordinator.data
-        return self._mqtt_key in mqtt_data
+        return self._mqtt_key in mqtt_data and client.is_fresh(self._mqtt_key)
 
     @property
     def native_value(self):
@@ -833,150 +681,14 @@ class UNASShareSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        if not self.coordinator.mqtt_client.is_available():
+        client = self.coordinator.mqtt_client
+        if not client.is_available() or not client.listed("shares", self._share_name):
             return False
-        return self._mqtt_key in self.coordinator.data
+        return self._mqtt_key in self.coordinator.data and client.is_fresh(self._mqtt_key)
 
     @property
     def native_value(self):
         return self._resolve_value()
-
-
-async def _discover_and_add_share_sensors(
-        coordinator: UNASDataCoordinator,
-        async_add_entities: AddEntitiesCallback,
-) -> None:
-    from homeassistant.helpers import entity_registry as er, device_registry as dr
-    from homeassistant.components import mqtt
-
-    mqtt_data = coordinator.mqtt_client.get_data()
-    share_pattern = re.compile(r"^unas_share_(.+)_usage$")
-    detected_shares = set()
-    for key in mqtt_data.keys():
-        if match := share_pattern.match(key):
-            detected_shares.add(match.group(1))
-
-    missing_shares = coordinator.discovered_shares - detected_shares
-    if missing_shares:
-        _LOGGER.info("Shares no longer detected: %s", sorted(missing_shares))
-        coordinator.discovered_shares -= missing_shares
-
-        entity_reg = er.async_get(coordinator.hass)
-        device_reg = dr.async_get(coordinator.hass)
-        mqtt_root = coordinator.mqtt_client.mqtt_root
-
-        for share_name in missing_shares:
-            for sensor_suffix, _, _, _, _, _ in SHARE_SENSORS:
-                unique_id = f"{coordinator.entry.entry_id}_unas_share_{share_name}_{sensor_suffix}"
-                if entity_id := entity_reg.async_get_entity_id("sensor", DOMAIN, unique_id):
-                    entity_reg.async_remove(entity_id)
-
-            # clear all retained share topics (including metadata)
-            for metric in ("usage", "quota", "pool", "member_count",
-                           "members", "snapshot_enabled", "encryption"):
-                await mqtt.async_publish(
-                    coordinator.hass,
-                    f"{mqtt_root}/share/{share_name}/{metric}",
-                    "",
-                    qos=0,
-                    retain=True,
-                )
-
-            device_id = (DOMAIN, f"{coordinator.entry.entry_id}_share_{share_name}")
-            if device := device_reg.async_get_device(identifiers={device_id}):
-                device_reg.async_remove_device(device.id)
-                _LOGGER.info("Removed service device for share %s", share_name)
-
-    new_shares = detected_shares - coordinator.discovered_shares
-    if not new_shares:
-        return
-
-    _LOGGER.debug("Discovered new shares: %s", sorted(new_shares))
-
-    entities = []
-    for share_name in sorted(new_shares):
-        for sensor_suffix, name, unit, device_class, state_class, icon in SHARE_SENSORS:
-            entities.append(
-                UNASShareSensor(
-                    coordinator, share_name, sensor_suffix, name,
-                    unit, device_class, state_class, icon,
-                ))
-
-    if entities:
-        async_add_entities(entities)
-        coordinator.discovered_shares.update(new_shares)
-        _LOGGER.info("Added %d sensors for %d new shares", len(entities), len(new_shares))
-
-
-async def _discover_and_add_backup_sensors(
-        coordinator: UNASServiceCoordinator,
-        async_add_entities: AddEntitiesCallback,
-) -> None:
-    from homeassistant.helpers import entity_registry as er, device_registry as dr
-
-    if coordinator.data is None:
-        return
-    backup_tasks = coordinator.data["backup_tasks"]
-    task_ids = {task["id"] for task in backup_tasks}
-
-    entity_reg = er.async_get(coordinator.hass)
-    device_reg = dr.async_get(coordinator.hass)
-    entry_id = coordinator.entry.entry_id
-
-    known_suffixes = ("_status", "_last_run", "_next_run", "_duration", "_destination", "_source", "_schedule", "_name")
-
-    missing_tasks = coordinator.discovered_backup_task_sensors - task_ids
-    if missing_tasks:
-        _LOGGER.info("Backup tasks no longer detected: %s", sorted(missing_tasks))
-        coordinator.discovered_backup_task_sensors -= missing_tasks
-
-        for task_id in missing_tasks:
-            for suffix in known_suffixes:
-                unique_id = f"{entry_id}_backup_{task_id}{suffix}"
-                if entity_id := entity_reg.async_get_entity_id("sensor", DOMAIN, unique_id):
-                    entity_reg.async_remove(entity_id)
-
-            device_id = (DOMAIN, f"{entry_id}_backup_{task_id}")
-            if device := device_reg.async_get_device(identifiers={device_id}):
-                device_reg.async_remove_device(device.id)
-                _LOGGER.info("Removed service device for backup task %s", task_id)
-
-    # clean up orphaned entities from previous sessions
-    prefix = f"{entry_id}_backup_"
-    for entity in er.async_entries_for_config_entry(entity_reg, entry_id):
-        if entity.domain != "sensor" or not entity.unique_id.startswith(prefix):
-            continue
-        remainder = entity.unique_id[len(prefix):]
-        for suffix in known_suffixes:
-            if remainder.endswith(suffix):
-                task_id = remainder[:-len(suffix)]
-                if task_id not in task_ids:
-                    entity_reg.async_remove(entity.entity_id)
-                    _LOGGER.info("Removed orphaned backup sensor %s", entity.entity_id)
-                break
-
-    new_tasks = task_ids - coordinator.discovered_backup_task_sensors
-    if not new_tasks:
-        return
-
-    _LOGGER.debug("Discovered new backup tasks: %s", sorted(new_tasks))
-
-    entities = []
-    for task in backup_tasks:
-        if task["id"] in new_tasks:
-            entities.append(UNASBackupStatusSensor(coordinator, task))
-            entities.append(UNASBackupLastRunSensor(coordinator, task))
-            entities.append(UNASBackupNextRunSensor(coordinator, task))
-            entities.append(UNASBackupDurationSensor(coordinator, task))
-            entities.append(UNASBackupDestinationSensor(coordinator, task))
-            entities.append(UNASBackupSourceSensor(coordinator, task))
-            entities.append(UNASBackupScheduleSensor(coordinator, task))
-            entities.append(UNASBackupNameSensor(coordinator, task))
-
-    if entities:
-        async_add_entities(entities)
-        coordinator.discovered_backup_task_sensors.update(new_tasks)
-        _LOGGER.info("Added %d sensors for %d new backup tasks", len(entities), len(new_tasks))
 
 
 class UNASBackupStatusSensor(CoordinatorEntity, SensorEntity):
@@ -1242,3 +954,15 @@ class UNASBackupNameSensor(CoordinatorEntity, SensorEntity):
         if not task:
             return None
         return task.get("name")
+
+
+BACKUP_SENSORS = (
+    UNASBackupStatusSensor,
+    UNASBackupLastRunSensor,
+    UNASBackupNextRunSensor,
+    UNASBackupDurationSensor,
+    UNASBackupDestinationSensor,
+    UNASBackupSourceSensor,
+    UNASBackupScheduleSensor,
+    UNASBackupNameSensor,
+)

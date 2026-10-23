@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass
 
 from homeassistant.components import mqtt
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -36,6 +36,7 @@ from .const import (
 )
 from .coordinator import UNASDataCoordinator, UNASServiceCoordinator
 from .deploy import Deployer
+from .reconcile import Reconciler
 from .ssh_manager import BUNDLE_DIR, LEGACY_CLEANUP, SSHManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ class UNASRuntime:
     data: UNASDataCoordinator
     service: UNASServiceCoordinator
     deployer: Deployer
+    reconciler: Reconciler
     ssh: SSHManager
 
 
@@ -114,7 +116,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool
     data = UNASDataCoordinator(hass, entry)
     service = UNASServiceCoordinator(hass, entry, ssh)
     deployer = Deployer(hass, entry, ssh, service)
-    entry.runtime_data = UNASRuntime(data, service, deployer, ssh)
+    reconciler = Reconciler(hass, entry, data, service)
+    entry.runtime_data = UNASRuntime(data, service, deployer, reconciler, ssh)
 
     await data.async_start()
 
@@ -128,6 +131,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool
     )
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    reconciler.async_start()
 
     # SSH never blocks setup, the MQTT entities work without it
     entry.async_on_unload(service.async_add_listener(deployer.async_check))
@@ -172,6 +176,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> boo
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         await entry.runtime_data.ssh.disconnect()
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+        hass: HomeAssistant, entry: UNASConfigEntry, device: dr.DeviceEntry
+) -> bool:
+    if entry.state is not ConfigEntryState.LOADED:
+        # whatever still exists comes back with the next setup
+        return (DOMAIN, entry.entry_id) not in device.identifiers
+    # only what the UNAS no longer reports, the rest would just come back
+    return entry.runtime_data.reconciler.async_remove_device(device)
 
 
 async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

@@ -76,10 +76,6 @@ class UNASDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         super().__init__(hass, _LOGGER, config_entry=entry, name=f"{DOMAIN} mqtt")
         self.entry = entry
-        self.discovered_bays: set[str] = set()
-        self.discovered_nvmes: set[str] = set()
-        self.discovered_pools: set[str] = set()
-        self.discovered_shares: set[str] = set()
         self._debouncer = Debouncer(
             hass, _LOGGER, cooldown=PUSH_DEBOUNCE, immediate=False, function=self._async_push
         )
@@ -152,9 +148,6 @@ class UNASServiceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
         self.entry = entry
         self.ssh_manager = ssh
-        self.discovered_backup_task_sensors: set[str] = set()
-        self.discovered_backup_task_buttons: set[str] = set()
-        self.discovered_backup_task_switches: set[str] = set()
         self._failing_since: float | None = None
 
     @property
@@ -180,7 +173,9 @@ class UNASServiceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         record_host_key_pin(self.hass, self.entry, self.ssh_manager)
 
         backup_tasks = status.get("backup_tasks")
-        if backup_tasks is None:
+        current = backup_tasks is not None
+        if not current:
+            # unknown, keep showing the last list but never remove tasks from it
             _LOGGER.debug("Could not fetch backup tasks: %s", status.get("backup_error"))
             backup_tasks = (self.data or {}).get("backup_tasks", [])
 
@@ -191,6 +186,7 @@ class UNASServiceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "monitor_running": services.get("unas_monitor") == "active",
             "fan_control_running": services.get("fan_control") == "active",
             "backup_tasks": backup_tasks,
+            "backup_tasks_current": current,
         }
 
     def _track_outage(self, host: str) -> None:

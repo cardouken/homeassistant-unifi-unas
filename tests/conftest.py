@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -148,7 +149,7 @@ def fire(hass, topic, payload, retain=False):
     async_fire_mqtt_message(hass, f"{ROOT_TOPIC}/{topic}", str(payload), retain=retain)
 
 
-def fire_monitor_cycle(hass, bays=("1", "2"), shares=("plex",), pools=("1",)):
+def fire_monitor_cycle(hass, bays=("1", "2"), shares=("plex",), pools=("1",), inventory=True):
     fire(hass, "availability", "online")
     for key, value in {"cpu_temp": 50, "fan_speed": 76, "memory_total": 7900, "uptime": 1000,
                        "machine_id": "abc"}.items():
@@ -163,6 +164,10 @@ def fire_monitor_cycle(hass, bays=("1", "2"), shares=("plex",), pools=("1",)):
     for share in shares:
         for key, value in {"usage": 39107.2, "quota": -1, "pool": "1"}.items():
             fire(hass, f"share/{share}/{key}", value)
+    if inventory:
+        fire(hass, "inventory", json.dumps({
+            "bays": list(bays), "nvme": [], "pools": [int(pool) for pool in pools], "shares": list(shares),
+        } if inventory is True else inventory))
 
 
 def fire_fan_settings(hass, mode="target_temp"):

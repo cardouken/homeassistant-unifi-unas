@@ -31,12 +31,12 @@ async def async_setup_entry(
     ])
 
     @callback
-    def _discover() -> None:
-        entry.async_create_background_task(
-            hass, _discover_and_add_backup_buttons(coordinator, async_add_entities), f"{DOMAIN} discovery"
+    def add_backups(task_ids: list[str]) -> None:
+        async_add_entities(
+            UNASBackupTriggerButton(coordinator, coordinator.find_backup_task(task_id)) for task_id in task_ids
         )
 
-    entry.async_on_unload(coordinator.async_add_listener(_discover))
+    entry.runtime_data.reconciler.register("backups", add_backups)
 
 
 class UNASReinstallScriptsButton(CoordinatorEntity, ButtonEntity):
@@ -107,56 +107,6 @@ class UNASShutdownButton(CoordinatorEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         await self.coordinator.ssh_manager.execute_command("shutdown -h now")
-
-
-async def _discover_and_add_backup_buttons(
-        coordinator: UNASServiceCoordinator,
-        async_add_entities: AddEntitiesCallback,
-) -> None:
-    from homeassistant.helpers import entity_registry as er
-
-    if coordinator.data is None:
-        return
-    backup_tasks = coordinator.data["backup_tasks"]
-    task_ids = {task["id"] for task in backup_tasks}
-
-    entity_reg = er.async_get(coordinator.hass)
-    entry_id = coordinator.entry.entry_id
-
-    missing_tasks = coordinator.discovered_backup_task_buttons - task_ids
-    if missing_tasks:
-        _LOGGER.info("Backup task buttons no longer needed: %s", sorted(missing_tasks))
-        coordinator.discovered_backup_task_buttons -= missing_tasks
-
-        for task_id in missing_tasks:
-            unique_id = f"{entry_id}_backup_{task_id}"
-            if entity_id := entity_reg.async_get_entity_id("button", DOMAIN, unique_id):
-                entity_reg.async_remove(entity_id)
-                _LOGGER.debug("Removed backup button entity %s", entity_id)
-
-    # clean up orphaned entities from previous sessions if needed
-    prefix = f"{entry_id}_backup_"
-    for entity in er.async_entries_for_config_entry(entity_reg, entry_id):
-        if entity.domain != "button" or not entity.unique_id.startswith(prefix):
-            continue
-        task_id = entity.unique_id[len(prefix):]
-        if task_id not in task_ids:
-            entity_reg.async_remove(entity.entity_id)
-            _LOGGER.info("Removed orphaned backup button %s", entity.entity_id)
-
-    new_tasks = task_ids - coordinator.discovered_backup_task_buttons
-    if not new_tasks:
-        return
-
-    entities = []
-    for task in backup_tasks:
-        if task["id"] in new_tasks:
-            entities.append(UNASBackupTriggerButton(coordinator, task))
-
-    if entities:
-        async_add_entities(entities)
-        coordinator.discovered_backup_task_buttons.update(new_tasks)
-        _LOGGER.info("Added %d backup trigger buttons", len(entities))
 
 
 class UNASBackupTriggerButton(CoordinatorEntity, ButtonEntity):
