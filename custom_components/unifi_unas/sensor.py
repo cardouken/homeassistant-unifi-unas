@@ -31,6 +31,7 @@ from .const import (
 )
 from .coordinator import UNASDataCoordinator, UNASServiceCoordinator
 from .devices import backup_device, drive_device, main_device, share_device
+from .fan_state import FanState, pwm_to_percent
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -399,82 +400,61 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
 
 
 class UNASFanCurveVisualizationSensor(CoordinatorEntity, SensorEntity):
+    _unrecorded_attributes = frozenset({"curve_points", "curve_formula"})
+
     def __init__(self, coordinator: UNASDataCoordinator) -> None:
         super().__init__(coordinator)
         self._attr_has_entity_name = True
         self._attr_name = "Fan Curve"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_fan_curve_viz"
         self._attr_icon = "mdi:chart-line"
-
         self._attr_device_info = main_device(coordinator.entry)
 
-    @callback
-    def _handle_coordinator_update(self) -> None:
-        self._update_state()
-        self.async_write_ha_state()
+    @property
+    def _curve(self) -> dict[str, int]:
+        return FanState.from_data(self.coordinator.data).curve
 
-    def _update_state(self) -> None:
-        mqtt_data = self.coordinator.data
+    @property
+    def available(self) -> bool:
+        return all(key in self._curve for key in ("min_temp", "max_temp", "min_fan", "max_fan"))
 
-        min_temp = mqtt_data.get("fan_curve_min_temp", 43)
-        max_temp = mqtt_data.get("fan_curve_max_temp", 47)
-        min_fan = mqtt_data.get("fan_curve_min_fan", 204)
-        max_fan = mqtt_data.get("fan_curve_max_fan", 255)
-
-        # convert PWM to percentage for display
-        min_fan_pct = round((min_fan * 100) / 255)
-        max_fan_pct = round((max_fan * 100) / 255)
-
-        # state: summary string
-        self._attr_native_value = (
-            f"{min_temp}-{max_temp}°C → {min_fan_pct}-{max_fan_pct}%"
+    @property
+    def native_value(self) -> str | None:
+        if not self.available:
+            return None
+        curve = self._curve
+        return (
+            f"{curve['min_temp']}-{curve['max_temp']}°C → "
+            f"{pwm_to_percent(curve['min_fan'])}-{pwm_to_percent(curve['max_fan'])}%"
         )
 
-        # generate curve points for charting (temp, fan%)
-        curve_points = self._generate_curve_points(min_temp, max_temp, min_fan, max_fan)
-
-        # Set attributes for charting
-        self._attr_extra_state_attributes = {
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        if not self.available:
+            return None
+        curve = self._curve
+        min_temp, max_temp, min_fan, max_fan = (curve[k] for k in ("min_temp", "max_temp", "min_fan", "max_fan"))
+        min_fan_pct, max_fan_pct = pwm_to_percent(min_fan), pwm_to_percent(max_fan)
+        return {
             "min_temp": min_temp,
             "max_temp": max_temp,
             "min_fan_pwm": min_fan,
             "max_fan_pwm": max_fan,
             "min_fan_percent": min_fan_pct,
             "max_fan_percent": max_fan_pct,
-            "curve_points": curve_points,
+            "curve_points": [
+                [temp, pwm_to_percent(curve_pwm(temp, min_temp, max_temp, min_fan, max_fan))] for temp in range(30, 61)
+            ],
             "curve_formula": f"Linear: {min_temp}°C→{min_fan_pct}%, {max_temp}°C→{max_fan_pct}%",
         }
 
-    def _generate_curve_points(
-            self, min_temp: float, max_temp: float, min_fan: float, max_fan: float
-    ) -> list:
-        points = []
 
-        # Generate points from 30°C to 60°C
-        for temp in range(30, 61):
-            if temp < min_temp:
-                fan_pwm = min_fan
-            elif temp > max_temp:
-                fan_pwm = max_fan
-            else:
-                fan_pwm = min_fan + (temp - min_temp) * (max_fan - min_fan) / (
-                        max_temp - min_temp
-                )
-
-            fan_percent = round((fan_pwm * 100) / 255)
-            points.append([temp, fan_percent])
-
-        return points
-
-    @property
-    def available(self) -> bool:
-        mqtt_data = self.coordinator.data
-        return (
-                "fan_curve_min_temp" in mqtt_data
-                and "fan_curve_max_temp" in mqtt_data
-                and "fan_curve_min_fan" in mqtt_data
-                and "fan_curve_max_fan" in mqtt_data
-        )
+def curve_pwm(temp: float, min_temp: float, max_temp: float, min_fan: float, max_fan: float) -> float:
+    if temp < min_temp:
+        return min_fan
+    if temp > max_temp or max_temp <= min_temp:
+        return max_fan
+    return min_fan + (temp - min_temp) * (max_fan - min_fan) / (max_temp - min_temp)
 
 
 class UNASNVMeSensor(CoordinatorEntity, SensorEntity):

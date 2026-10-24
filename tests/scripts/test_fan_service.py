@@ -60,7 +60,25 @@ def test_only_missing_settings_are_republished(service):
     assert f"{fc.MQTT_FAN_CONTROL}/mode" not in published
     assert f"{fc.MQTT_FAN_CONTROL}/curve/target_temp" not in published
     assert published[f"{fc.MQTT_FAN_CONTROL}/curve/min_fan"] == ("64", True)
-    assert len(published) == 6
+    assert published[f"{fc.MQTT_FAN_CONTROL}/speed"] == ("128", True)
+    assert len(published) == 7
+
+
+def test_legacy_speed_mode_moves_to_the_speed_topic(service):
+    service._on_message(None, None, setting("mode", "153"))
+    assert (service.settings["mode"], service.settings["speed"]) == ("set_speed", 153)
+    assert {"mode", "speed"} <= service.received
+    published = {topic: (payload, retain) for topic, payload, retain in service.published}
+    assert published == {
+        f"{fc.MQTT_FAN_CONTROL}/speed": ("153", True),
+        f"{fc.MQTT_FAN_CONTROL}/mode": ("set_speed", True),
+    }
+
+
+@pytest.mark.parametrize("payload", ["256", "-1", "fast", "12.5"])
+def test_invalid_speed_is_ignored(service, payload):
+    service._on_message(None, None, setting("speed", payload))
+    assert service.settings["speed"] == 128
 
 
 def test_foreign_pwm_write_is_overwritten(service, tmp_path):

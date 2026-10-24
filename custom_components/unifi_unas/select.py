@@ -2,34 +2,28 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components import mqtt
 from homeassistant.components.select import SelectEntity
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import UNASConfigEntry
-from .const import CONF_DEVICE_MODEL, get_mqtt_topics
-from .devices import main_device
+from .const import CONF_DEVICE_MODEL
 from .coordinator import UNASDataCoordinator
+from .devices import main_device
+from .fan_state import FanState, async_publish_setting
 from .ssh_manager import SSHManager
-from .fan_mode import FanModeMixin
-
-DEFAULT_FAN_SPEED_50_PCT = 128
 
 _LOGGER = logging.getLogger(__name__)
+
+DEFAULT_SPEED = 128
 
 MODE_CUSTOM_CURVE = "Custom Curve"
 MODE_SET_SPEED = "Set Speed"
 MODE_TARGET_TEMP = "Target Temp"
 
-TEMP_METRIC_MAX = "Max (Hottest)"
-TEMP_METRIC_AVG = "Average"
-
-RESPONSE_RELAXED = "Relaxed"
-RESPONSE_BALANCED = "Balanced"
-RESPONSE_AGGRESSIVE = "Aggressive"
+TEMP_METRICS = {"max": "Max (Hottest)", "avg": "Average"}
+RESPONSE_SPEEDS = {"relaxed": "Relaxed", "balanced": "Balanced", "aggressive": "Aggressive"}
 
 
 async def async_setup_entry(
@@ -39,302 +33,99 @@ async def async_setup_entry(
 ) -> None:
     coordinator = entry.runtime_data.data
     async_add_entities([
-        UNASFanModeSelect(coordinator, hass, entry.runtime_data.ssh),
-        UNASTempMetricSelect(coordinator, hass),
-        UNASResponseSpeedSelect(coordinator, hass),
+        UNASFanModeSelect(coordinator, entry.runtime_data.ssh),
+        UNASFanOptionSelect(
+            coordinator, "temp_metric", "Temperature Metric", "mdi:thermometer-lines", "temp_metric", TEMP_METRICS
+        ),
+        UNASFanOptionSelect(
+            coordinator, "response_speed", "Response Speed", "mdi:speedometer", "response_speed", RESPONSE_SPEEDS
+        ),
     ])
 
 
-class UNASFanModeSelect(CoordinatorEntity, SelectEntity, RestoreEntity):
-    def __init__(self, coordinator: UNASDataCoordinator, hass: HomeAssistant, ssh: SSHManager) -> None:
-        super().__init__(coordinator)
-        self.hass = hass
-        self._ssh = ssh
-        self._topics = get_mqtt_topics(coordinator.entry.entry_id)
-        self._attr_has_entity_name = True
-        self._attr_name = "Fan Mode"
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_fan_mode"
-        self._attr_icon = "mdi:fan-auto"
-        self._current_option = None
-        self._last_pwm = None
-        self._unsubscribe = None
+class UNASFanSelect(CoordinatorEntity, SelectEntity):
+    coordinator: UNASDataCoordinator
 
-        base_type = "UNVR" if coordinator.entry.data[CONF_DEVICE_MODEL].startswith("UNVR") else "UNAS"
-        self._mode_managed = f"{base_type} Managed"
-        self._attr_options = [self._mode_managed, MODE_CUSTOM_CURVE, MODE_TARGET_TEMP, MODE_SET_SPEED]
+    def __init__(self, coordinator: UNASDataCoordinator, key: str, name: str, icon: str) -> None:
+        super().__init__(coordinator)
+        self._attr_has_entity_name = True
+        self._attr_name = name
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
+        self._attr_icon = icon
         self._attr_device_info = main_device(coordinator.entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-
-        if (last_state := await self.async_get_last_state()) is not None and last_state.state in self._attr_options:
-            self._current_option = last_state.state
-            self._last_pwm = last_state.attributes.get("last_pwm")
-        else:
-            self._current_option = self._mode_managed
-
-        @callback
-        def message_received(msg):
-            payload = msg.payload
-
-            if payload == "unas_managed":
-                self._current_option = self._mode_managed
-            elif payload == "auto":
-                self._current_option = MODE_CUSTOM_CURVE
-            elif payload == "target_temp":
-                self._current_option = MODE_TARGET_TEMP
-            elif payload.isdigit():
-                self._current_option = MODE_SET_SPEED
-                try:
-                    self._last_pwm = int(payload)
-                except (ValueError, TypeError):
-                    pass
-            else:
-                self._current_option = self._mode_managed
-
-            self.async_write_ha_state()
-
-        self._unsubscribe = await mqtt.async_subscribe(
-            self.hass, f"{self._topics['control']}/fan/mode", message_received, qos=0
-        )
-
-    async def _publish_mode(self, mode: str) -> None:
-        try:
-            await mqtt.async_publish(self.hass, f"{self._topics['control']}/fan/mode", mode, qos=0, retain=True)
-        except Exception as err:
-            _LOGGER.error("Failed to publish fan mode: %s", err)
-
     @property
-    def available(self) -> bool:
-        return self.coordinator.mqtt_client.fan_available() and self._current_option is not None
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._unsubscribe:
-            try:
-                self._unsubscribe()
-            except Exception as err:
-                _LOGGER.debug("Error unsubscribing from fan mode: %s", err)
-        await super().async_will_remove_from_hass()
-
-    @property
-    def current_option(self) -> str | None:
-        return self._current_option
+    def fan(self) -> FanState:
+        return FanState.from_data(self.coordinator.data)
 
     @property
     def extra_state_attributes(self) -> dict:
-        return {"last_pwm": self._last_pwm} if self._last_pwm is not None else {}
+        # kept from when these restored their own state, automations may read it
+        return {"current_mode": self.fan.mode} if self.fan.mode is not None else {}
+
+
+class UNASFanModeSelect(UNASFanSelect):
+    def __init__(self, coordinator: UNASDataCoordinator, ssh: SSHManager) -> None:
+        super().__init__(coordinator, "fan_mode", "Fan Mode", "mdi:fan-auto")
+        self._ssh = ssh
+        base_type = "UNVR" if coordinator.entry.data[CONF_DEVICE_MODEL].startswith("UNVR") else "UNAS"
+        self._modes = {
+            "unas_managed": f"{base_type} Managed",
+            "auto": MODE_CUSTOM_CURVE,
+            "target_temp": MODE_TARGET_TEMP,
+            "set_speed": MODE_SET_SPEED,
+        }
+        self._attr_options = list(self._modes.values())
+
+    @property
+    def available(self) -> bool:
+        return self.coordinator.mqtt_client.fan_available() and self.fan.mode is not None
+
+    @property
+    def current_option(self) -> str | None:
+        return self._modes.get(self.fan.mode)
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"last_pwm": self.fan.speed} if self.fan.speed is not None else {}
 
     async def async_select_option(self, option: str) -> None:
-        if option == self._mode_managed:
-            await self._publish_mode("unas_managed")
+        mode = next(mode for mode, label in self._modes.items() if label == option)
+        if mode == "set_speed":
+            # start from the speed the fans run at now instead of jumping
+            pwm = self.fan.pwm
+            await async_publish_setting(self.coordinator, "speed", pwm if pwm is not None else DEFAULT_SPEED)
+        await async_publish_setting(self.coordinator, "mode", mode)
+        if mode == "unas_managed":
             try:
                 await self._ssh.kick_native_fan_control()
             except Exception as err:
                 _LOGGER.warning("Could not kick native fan control (non-critical): %s", err)
-        elif option == MODE_CUSTOM_CURVE:
-            await self._publish_mode("auto")
-        elif option == MODE_TARGET_TEMP:
-            await self._publish_mode("target_temp")
-        elif option == MODE_SET_SPEED:
-            mqtt_data = self.coordinator.mqtt_client.get_data()
-            current_speed = mqtt_data.get("unas_fan_speed", DEFAULT_FAN_SPEED_50_PCT)
-            self._last_pwm = current_speed
-            await self._publish_mode(str(current_speed))
-
-        self._current_option = option
-        self.async_write_ha_state()
 
 
-class UNASTempMetricSelect(FanModeMixin, CoordinatorEntity, SelectEntity, RestoreEntity):
-    """Select entity for choosing temperature metric (max or average) for Target Temp mode."""
-
-    def __init__(self, coordinator: UNASDataCoordinator, hass: HomeAssistant) -> None:
-        super().__init__(coordinator)
-        self.hass = hass
-        self._topics = get_mqtt_topics(coordinator.entry.entry_id)
-        self._attr_has_entity_name = True
-        self._attr_name = "Temperature Metric"
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_temp_metric"
-        self._attr_icon = "mdi:thermometer-lines"
-        self._current_option = None
-        self._unsubscribe = None
-
-        self._attr_options = [TEMP_METRIC_MAX, TEMP_METRIC_AVG]
-
-        self._attr_device_info = main_device(coordinator.entry)
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-
-        if (last_state := await self.async_get_last_state()) is not None:
-            if last_state.state in self._attr_options:
-                self._current_option = last_state.state
-            self._current_mode = last_state.attributes.get("current_mode")
-        if self._current_option is None:
-            self._current_option = TEMP_METRIC_MAX
-
-        @callback
-        def message_received(msg):
-            payload = msg.payload
-
-            if payload == "avg":
-                self._current_option = TEMP_METRIC_AVG
-            else:
-                self._current_option = TEMP_METRIC_MAX
-
-            self.async_write_ha_state()
-
-        self._unsubscribe = await mqtt.async_subscribe(
-            self.hass, f"{self._topics['control']}/fan/curve/temp_metric", message_received, qos=0
-        )
-
-        await self._subscribe_fan_mode()
-
-    async def _publish_metric(self, metric: str) -> None:
-        try:
-            await mqtt.async_publish(
-                self.hass,
-                f"{self._topics['control']}/fan/curve/temp_metric",
-                metric,
-                qos=0,
-                retain=True,
-            )
-        except Exception as err:
-            _LOGGER.error("Failed to publish temp metric: %s", err)
+class UNASFanOptionSelect(UNASFanSelect):
+    def __init__(
+            self, coordinator: UNASDataCoordinator, key: str, name: str, icon: str, setting: str,
+            labels: dict[str, str],
+    ) -> None:
+        super().__init__(coordinator, key, name, icon)
+        self._setting = setting
+        self._labels = labels
+        self._attr_options = list(labels.values())
 
     @property
     def available(self) -> bool:
-        if not self.coordinator.mqtt_client.fan_available() or self._current_option is None:
-            return False
-
-        # Only available in Target Temp mode
-        return self._current_mode == "target_temp"
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._unsubscribe:
-            try:
-                self._unsubscribe()
-            except Exception as err:
-                _LOGGER.debug("Error unsubscribing from temp metric: %s", err)
-        self._unsubscribe_fan_mode()
-        await super().async_will_remove_from_hass()
-
-    @property
-    def current_option(self) -> str | None:
-        return self._current_option
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        attrs = {}
-        if self._current_mode is not None:
-            attrs["current_mode"] = self._current_mode
-        return attrs
-
-    async def async_select_option(self, option: str) -> None:
-        mqtt_value = "avg" if option == TEMP_METRIC_AVG else "max"
-        await self._publish_metric(mqtt_value)
-
-        self._current_option = option
-        self.async_write_ha_state()
-
-
-class UNASResponseSpeedSelect(FanModeMixin, CoordinatorEntity, SelectEntity, RestoreEntity):
-    """Select entity for choosing fan response speed preset."""
-
-    def __init__(self, coordinator: UNASDataCoordinator, hass: HomeAssistant) -> None:
-        super().__init__(coordinator)
-        self.hass = hass
-        self._topics = get_mqtt_topics(coordinator.entry.entry_id)
-        self._attr_has_entity_name = True
-        self._attr_name = "Response Speed"
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_response_speed"
-        self._attr_icon = "mdi:speedometer"
-        self._current_option = None
-        self._unsubscribe = None
-
-        self._attr_options = [RESPONSE_RELAXED, RESPONSE_BALANCED, RESPONSE_AGGRESSIVE]
-
-        self._attr_device_info = main_device(coordinator.entry)
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-
-        if (last_state := await self.async_get_last_state()) is not None:
-            if last_state.state in self._attr_options:
-                self._current_option = last_state.state
-            self._current_mode = last_state.attributes.get("current_mode")
-        if self._current_option is None:
-            self._current_option = RESPONSE_BALANCED
-
-        @callback
-        def message_received(msg):
-            payload = msg.payload
-
-            if payload == "relaxed":
-                self._current_option = RESPONSE_RELAXED
-            elif payload == "aggressive":
-                self._current_option = RESPONSE_AGGRESSIVE
-            else:
-                self._current_option = RESPONSE_BALANCED
-
-            self.async_write_ha_state()
-
-        self._unsubscribe = await mqtt.async_subscribe(
-            self.hass, f"{self._topics['control']}/fan/curve/response_speed", message_received, qos=0
+        fan = self.fan
+        return (
+            self.coordinator.mqtt_client.fan_available()
+            and getattr(fan, self._setting) is not None
+            and fan.mode == "target_temp"
         )
 
-        await self._subscribe_fan_mode()
-
-    def _option_to_mqtt(self, option: str) -> str:
-        if option == RESPONSE_RELAXED:
-            return "relaxed"
-        elif option == RESPONSE_AGGRESSIVE:
-            return "aggressive"
-        return "balanced"
-
-    async def _publish_speed(self, speed: str) -> None:
-        try:
-            await mqtt.async_publish(
-                self.hass,
-                f"{self._topics['control']}/fan/curve/response_speed",
-                speed,
-                qos=0,
-                retain=True,
-            )
-        except Exception as err:
-            _LOGGER.error("Failed to publish response speed: %s", err)
-
-    @property
-    def available(self) -> bool:
-        if not self.coordinator.mqtt_client.fan_available() or self._current_option is None:
-            return False
-
-        # Only available in Target Temp mode
-        return self._current_mode == "target_temp"
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._unsubscribe:
-            try:
-                self._unsubscribe()
-            except Exception as err:
-                _LOGGER.debug("Error unsubscribing from response speed: %s", err)
-        self._unsubscribe_fan_mode()
-        await super().async_will_remove_from_hass()
-
     @property
     def current_option(self) -> str | None:
-        return self._current_option
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        attrs = {}
-        if self._current_mode is not None:
-            attrs["current_mode"] = self._current_mode
-        return attrs
+        return self._labels.get(getattr(self.fan, self._setting))
 
     async def async_select_option(self, option: str) -> None:
-        mqtt_value = self._option_to_mqtt(option)
-        await self._publish_speed(mqtt_value)
-
-        self._current_option = option
-        self.async_write_ha_state()
+        value = next(value for value, label in self._labels.items() if label == option)
+        await async_publish_setting(self.coordinator, f"curve/{self._setting}", value)

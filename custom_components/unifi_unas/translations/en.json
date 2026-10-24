@@ -141,5 +141,16 @@
         }
       }
     }
+  },
+  "exceptions": {
+    "set_speed_only": {
+      "message": "Fan Speed can only be set in Set Speed mode. Switch Fan Mode to Set Speed first."
+    },
+    "temperature_order": {
+      "message": "Max temperature ({max}°C) must be greater than min temperature ({min}°C)."
+    },
+    "fan_order": {
+      "message": "Max fan speed ({max}%) must be greater than min fan speed ({min}%)."
+    }
   }
 }

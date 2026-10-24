@@ -65,9 +65,11 @@ DEFAULT_SETTINGS = {
     "target_temp": 42,
     "temp_metric": "max",
     "response_speed": "balanced",
+    "speed": 128,
 }
 SETTING_TOPICS = {
     "mode": "mode",
+    "speed": "speed",
     "curve/min_temp": "min_temp",
     "curve/max_temp": "max_temp",
     "curve/min_fan": "min_fan",
@@ -77,7 +79,9 @@ SETTING_TOPICS = {
     "curve/response_speed": "response_speed",
 }
 INT_SETTINGS = ("min_temp", "max_temp", "min_fan", "max_fan", "target_temp")
-MODE_PATTERN = re.compile(r"unas_managed|auto|target_temp|[0-9]{1,3}")
+MODE_PATTERN = re.compile(r"unas_managed|auto|target_temp|set_speed|[0-9]{1,3}")
+# before the speed topic, Set Speed was the PWM written into the mode topic
+LEGACY_SPEED_MODE = re.compile(r"[0-9]{1,3}")
 INT_PATTERN = re.compile(r"[0-9]+")
 
 
@@ -93,9 +97,18 @@ def parse_setting(key, payload):
         return payload if payload in ("max", "avg") else None
     if key == "response_speed":
         return payload if payload in RESPONSE_MULTIPLIERS else None
+    if key == "speed":
+        return int(payload) if INT_PATTERN.fullmatch(payload) and int(payload) <= 255 else None
     if key in INT_SETTINGS:
         return int(payload) if INT_PATTERN.fullmatch(payload) else None
     return None
+
+
+def controller_settings(settings):
+    # the controller still takes Set Speed as a numeric mode
+    if settings["mode"] == "set_speed":
+        return dict(settings, mode=str(settings["speed"]))
+    return dict(settings)
 
 
 def metric_value(temps, metric):
@@ -374,6 +387,9 @@ def load_settings():
             value = parse_setting(key, str(stored.get(key, "")))
             if value is not None:
                 settings[key] = value
+    if LEGACY_SPEED_MODE.fullmatch(settings["mode"]) and int(settings["mode"]) <= 255:
+        settings["speed"] = int(settings["mode"])
+        settings["mode"] = "set_speed"
     return settings
 
 
@@ -469,12 +485,20 @@ class FanService:
                 self.rejected.add((key, payload))
                 logger.warning("Ignoring invalid %s value %r", key, payload)
             return
+        updates = {key: value}
+        if key == "mode" and LEGACY_SPEED_MODE.fullmatch(value) and int(value) <= 255:
+            updates = {"mode": "set_speed", "speed": int(value)}
+            logger.info("Converting the legacy Set Speed mode %s to the speed topic", value)
+            self.client.publish(f"{MQTT_FAN_CONTROL}/speed", str(updates["speed"]), retain=True)
+            self.client.publish(f"{MQTT_FAN_CONTROL}/mode", "set_speed", retain=True)
         with self.lock:
-            self.received.add(key)
-            if self.settings[key] != value:
-                self.settings[key] = value
+            self.received.update(updates)
+            changed = {k: v for k, v in updates.items() if self.settings[k] != v}
+            if changed:
+                self.settings.update(changed)
                 save_settings(self.settings)
-                logger.info("Setting %s = %s", key, value)
+        for k, v in changed.items():
+            logger.info("Setting %s = %s", k, v)
 
     def _publish_missing_settings(self):
         with self.lock:
@@ -563,7 +587,7 @@ class FanService:
                 self.last_poll = time.monotonic()
 
             with self.lock:
-                settings = dict(self.settings)
+                settings = controller_settings(self.settings)
             mode_before = settings["mode"]
             action, pwm = self.controller.tick(now, settings, self.temps, self._data_version(now))
             if settings["mode"] != mode_before:

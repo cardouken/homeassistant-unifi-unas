@@ -5,6 +5,7 @@ import logging
 import json
 import re
 from collections.abc import Callable
+from types import SimpleNamespace
 from typing import Any
 from datetime import datetime, timedelta
 
@@ -39,6 +40,7 @@ unas/nfs/mounts                      → unas_nfs_mounts                → valu
 unas/nfs/clients                     → unas_nfs_mounts                → attributes
 unas/control/monitor_interval        → monitor_interval               → value
 unas/control/fan/mode                → fan_mode                       → value
+unas/control/fan/speed               → fan_speed_setting              → value
 unas/control/fan/curve/{param}       → fan_curve_{param}              → value
 
 Examples:
@@ -187,9 +189,11 @@ class UNASMQTTClient:
             else:
                 self._store_value(f"unas_share_{identifier}_{metric}", payload)
 
-        # unas/control/fan/mode
+        # unas/control/fan/mode, unas/control/fan/speed
         elif category == "control" and identifier == "fan" and metric == "mode":
             self._store_value("fan_mode", payload)
+        elif category == "control" and identifier == "fan" and metric == "speed":
+            self._store_value("fan_speed_setting", payload)
 
     def _handle_four_part(self, parts, payload):
         if parts[0:3] == ["control", "fan", "curve"]:
@@ -268,6 +272,10 @@ class UNASMQTTClient:
         # a section of the monitor that keeps failing stops refreshing its values
         received = self._data_timestamps.get(key)
         return received is not None and datetime.now() - received <= STALE_AFTER
+
+    @callback
+    def async_apply(self, topic: str, payload: str) -> None:
+        self._handle_message(SimpleNamespace(topic=topic, payload=payload))
 
     def fan_available(self) -> bool:
         # an older fan daemon never publishes fan/availability, follow the monitor then

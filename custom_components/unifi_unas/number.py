@@ -1,31 +1,35 @@
 from __future__ import annotations
 
-import logging
-
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.restore_state import RestoreEntity
-
-from homeassistant.components import mqtt
 
 from . import UNASConfigEntry
-from .const import get_mqtt_topics
-from .devices import main_device
+from .const import DOMAIN
 from .coordinator import UNASDataCoordinator
-from .fan_mode import FanModeMixin
+from .devices import main_device
+from .fan_state import FanState, async_publish_setting, percent_to_pwm, pwm_to_percent
 
-_LOGGER = logging.getLogger(__name__)
-
-# fan curve parameter definitions: (key, name, min, max, default, unit, icon)
+# fan curve parameter definitions: (key, name, min, max, unit, icon)
 FAN_CURVE_PARAMS = [
-    ("min_temp", "Min Temperature", 20, 50, 40, "°C", "mdi:thermometer-low"),
-    ("max_temp", "Max Temperature", 30, 60, 50, "°C", "mdi:thermometer-high"),
-    ("min_fan", "Min Fan Speed", 0, 100, 30, "%", "mdi:fan-speed-1"),
-    ("max_fan", "Max Fan Speed", 1, 100, 100, "%", "mdi:fan-speed-3"),
-    ("target_temp", "Target Temperature", 20, 50, 40, "°C", "mdi:thermometer-check"),
+    ("min_temp", "Min Temperature", 20, 50, "°C", "mdi:thermometer-low"),
+    ("max_temp", "Max Temperature", 30, 60, "°C", "mdi:thermometer-high"),
+    ("min_fan", "Min Fan Speed", 0, 100, "%", "mdi:fan-speed-1"),
+    ("max_fan", "Max Fan Speed", 1, 100, "%", "mdi:fan-speed-3"),
+    ("target_temp", "Target Temperature", 20, 50, "°C", "mdi:thermometer-check"),
 ]
+FAN_PARAMS = ("min_fan", "max_fan")
+# which fan modes each curve parameter applies to
+CURVE_MODES = {
+    "min_temp": ("auto",),
+    "max_temp": ("auto",),
+    "min_fan": ("auto", "target_temp"),
+    "max_fan": ("auto", "target_temp"),
+    "target_temp": ("target_temp",),
+}
+MODE_ICONS = {"unas_managed": "mdi:fan-off", "auto": "mdi:fan-auto", "target_temp": "mdi:fan-auto"}
 
 
 async def async_setup_entry(
@@ -34,256 +38,108 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator = entry.runtime_data.data
-
-    entities = [
-        UNASFanSpeedNumber(coordinator, hass),
-    ]
-
-    # add fan curve configuration entities
-    for key, name, min_val, max_val, default, unit, icon in FAN_CURVE_PARAMS:
-        entities.append(
-            UNASFanCurveNumber(
-                coordinator, hass, key, name, min_val, max_val, default, unit, icon
-            )
-        )
-
-    async_add_entities(entities)
+    async_add_entities([
+        UNASFanSpeedNumber(coordinator),
+        *(UNASFanCurveNumber(coordinator, *param) for param in FAN_CURVE_PARAMS),
+    ])
 
 
-class UNASFanSpeedNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreEntity):
-    def __init__(
-        self, coordinator: UNASDataCoordinator, hass: HomeAssistant
-    ) -> None:
+class UNASFanNumber(CoordinatorEntity, NumberEntity):
+    coordinator: UNASDataCoordinator
+
+    def __init__(self, coordinator: UNASDataCoordinator, key: str, name: str) -> None:
         super().__init__(coordinator)
-        self.hass = hass
-        self._topics = get_mqtt_topics(coordinator.entry.entry_id)
         self._attr_has_entity_name = True
-        self._attr_name = "Fan Speed"
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_fan_speed_control"
-        self._attr_icon = "mdi:fan"
-        self._attr_native_min_value = 0
-        self._attr_native_max_value = 100
+        self._attr_name = name
+        self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
         self._attr_native_step = 1
-        self._attr_native_unit_of_measurement = "%"
-        self._attr_mode = NumberMode.SLIDER
-        self._current_value = None
-        self._unsubscribe_speed = None
-
         self._attr_device_info = main_device(coordinator.entry)
 
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-
-        if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                self._current_value = float(last_state.state)
-            except (ValueError, TypeError):
-                pass
-
-        @callback
-        def speed_message_received(msg):
-            try:
-                pwm_value = int(msg.payload)
-                percentage = round((pwm_value * 100) / 255)
-                self._current_value = percentage
-                self.async_write_ha_state()
-            except (ValueError, TypeError) as err:
-                _LOGGER.error("Failed to parse fan speed: %s", err)
-
-        self._unsubscribe_speed = await mqtt.async_subscribe(
-            self.hass, f"{self._topics['system']}/fan_speed", speed_message_received, qos=0
-        )
-
-        await self._subscribe_fan_mode()
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._unsubscribe_speed:
-            self._unsubscribe_speed()
-        self._unsubscribe_fan_mode()
-        await super().async_will_remove_from_hass()
+    @property
+    def fan(self) -> FanState:
+        return FanState.from_data(self.coordinator.data)
 
     @property
-    def native_value(self) -> float | None:
-        return self._current_value
+    def extra_state_attributes(self) -> dict:
+        # kept from when these restored their own state, automations may read it
+        return {"current_mode": self.fan.mode} if self.fan.mode is not None else {}
 
-    @property
-    def entity_registry_enabled_default(self) -> bool:
-        return True
+
+class UNASFanSpeedNumber(UNASFanNumber):
+    def __init__(self, coordinator: UNASDataCoordinator) -> None:
+        super().__init__(coordinator, "fan_speed_control", "Fan Speed")
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 100
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_mode = NumberMode.SLIDER
 
     @property
     def available(self) -> bool:
         return self.coordinator.mqtt_client.fan_available()
 
     @property
+    def native_value(self) -> float | None:
+        # the speed that was set in Set Speed, what the fans actually run at in the other modes
+        fan = self.fan
+        pwm = fan.speed if fan.mode == "set_speed" and fan.speed is not None else fan.pwm
+        return pwm_to_percent(pwm) if pwm is not None else None
+
+    @property
     def icon(self) -> str:
-        if self._current_mode == "unas_managed":
-            return "mdi:fan-off"
-        elif self._current_mode == "auto":
-            return "mdi:fan-auto"
-        elif self._current_mode == "target_temp":
-            return "mdi:fan-auto"
-        elif self._current_mode == "set_speed":
-            return "mdi:fan"
-        return "mdi:fan"
+        return MODE_ICONS.get(self.fan.mode, "mdi:fan")
 
     async def async_set_native_value(self, value: float) -> None:
-        if self._current_mode != "set_speed":
-            _LOGGER.warning("Cannot set fan speed - not in Set Speed mode")
-            return
-
-        pwm_value = round((value * 255) / 100)
-
-        try:
-            await mqtt.async_publish(
-                self.hass, f"{self._topics['control']}/fan/mode", str(pwm_value), qos=0, retain=True
-            )
-        except Exception as err:
-            _LOGGER.error("Failed to publish fan speed: %s", err)
-            return
-
-        self._current_value = value
-        self.async_write_ha_state()
+        if self.fan.mode != "set_speed":
+            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="set_speed_only")
+        await async_publish_setting(self.coordinator, "speed", percent_to_pwm(value))
 
 
-class UNASFanCurveNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreEntity):
+class UNASFanCurveNumber(UNASFanNumber):
     def __init__(
-        self,
-        coordinator: UNASDataCoordinator,
-        hass: HomeAssistant,
-        key: str,
-        name: str,
-        min_val: float,
-        max_val: float,
-        default: float,
-        unit: str,
-        icon: str,
+            self, coordinator: UNASDataCoordinator, key: str, name: str, min_val: int, max_val: int, unit: str,
+            icon: str,
     ) -> None:
-        super().__init__(coordinator)
-        self.hass = hass
+        super().__init__(coordinator, f"fan_curve_{key}", name)
         self._key = key
-        self._topics = get_mqtt_topics(coordinator.entry.entry_id)
-        self._attr_has_entity_name = True
-        self._attr_name = name
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_fan_curve_{key}"
         self._attr_native_min_value = min_val
         self._attr_native_max_value = max_val
-        self._attr_native_step = 1
-        self._attr_native_value = None
         self._attr_native_unit_of_measurement = unit
         self._attr_icon = icon
         self._attr_mode = NumberMode.BOX
-        self._default = default
-        self._unsubscribe = None
-        self._is_fan_param = key in ["min_fan", "max_fan"]
 
-        self._mqtt_topic = f"{self._topics['control']}/fan/curve/{key}"
+    def _value(self, fan: FanState, key: str) -> int | None:
+        value = fan.curve.get(key)
+        if value is not None and key in FAN_PARAMS:
+            value = pwm_to_percent(value)
+        return value
 
-        self._attr_device_info = main_device(coordinator.entry)
-
-    async def async_added_to_hass(self) -> None:
-        await super().async_added_to_hass()
-
-        if (last_state := await self.async_get_last_state()) is not None:
-            try:
-                self._attr_native_value = int(float(last_state.state))
-            except (ValueError, TypeError):
-                pass
-            self._current_mode = last_state.attributes.get("current_mode")
-
-        @callback
-        def message_received(msg):
-            try:
-                value = int(float(msg.payload))
-                
-                if self._is_fan_param:
-                    value = round((value * 100) / 255)
-
-                if self._attr_native_min_value <= value <= self._attr_native_max_value:
-                    self._attr_native_value = value
-                    self.async_write_ha_state()
-            except (ValueError, TypeError):
-                pass
-
-        self._unsubscribe = await mqtt.async_subscribe(
-            self.hass, self._mqtt_topic, message_received, qos=0
-        )
-
-        await self._subscribe_fan_mode()
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._unsubscribe:
-            self._unsubscribe()
-        self._unsubscribe_fan_mode()
-        await super().async_will_remove_from_hass()
+    @property
+    def native_value(self) -> int | None:
+        value = self._value(self.fan, self._key)
+        if value is None or not self._attr_native_min_value <= value <= self._attr_native_max_value:
+            return None
+        return value
 
     @property
     def available(self) -> bool:
-        if not self.coordinator.mqtt_client.fan_available() or self._attr_native_value is None:
-            return False
-
-        # Mode-specific availability
-        if self._key in ["min_temp", "max_temp"]:
-            # Only available in Custom Curve mode
-            return self._current_mode == "auto"
-        elif self._key == "target_temp":
-            # Only available in Target Temp mode
-            return self._current_mode == "target_temp"
-        elif self._key in ["min_fan", "max_fan"]:
-            # Available in both Custom Curve and Target Temp modes
-            return self._current_mode in ["auto", "target_temp"]
-
-        return True
-
-    @property
-    def extra_state_attributes(self) -> dict:
-        attrs = {}
-        if self._current_mode is not None:
-            attrs["current_mode"] = self._current_mode
-        return attrs
+        return (
+            self.coordinator.mqtt_client.fan_available()
+            and self.native_value is not None
+            and self.fan.mode in CURVE_MODES[self._key]
+        )
 
     async def async_set_native_value(self, value: float) -> None:
         value = int(value)
-
-        mqtt_data = self.coordinator.mqtt_client.get_data()
-
-        min_temp = mqtt_data.get("fan_curve_min_temp", 43 if self._key != "min_temp" else value)
-        max_temp = mqtt_data.get("fan_curve_max_temp", 47 if self._key != "max_temp" else value)
-        min_fan_pwm = mqtt_data.get("fan_curve_min_fan", 204)
-        max_fan_pwm = mqtt_data.get("fan_curve_max_fan", 255)
-
-        min_fan = round((min_fan_pwm * 100) / 255) if isinstance(min_fan_pwm, (int, float)) else 80
-        max_fan = round((max_fan_pwm * 100) / 255) if isinstance(max_fan_pwm, (int, float)) else 100
-
-        if self._key == "min_temp":
-            min_temp = value
-        elif self._key == "max_temp":
-            max_temp = value
-        elif self._key == "min_fan":
-            min_fan = value
-        elif self._key == "max_fan":
-            max_fan = value
-
-        if max_temp <= min_temp:
-            raise ValueError(f"Max temperature ({max_temp}°C) must be greater than min temperature ({min_temp}°C)")
-        if max_fan <= min_fan:
-            raise ValueError(f"Max fan speed ({max_fan}%) must be greater than min fan speed ({min_fan}%)")
-
-        self._attr_native_value = value
-        self.async_write_ha_state()
-        await self._publish_to_mqtt(value)
-
-    @property
-    def entity_registry_enabled_default(self) -> bool:
-        return True
-
-    async def _publish_to_mqtt(self, value: float) -> None:
-        mqtt_value = value
-        if self._is_fan_param:
-            mqtt_value = round((value * 255) / 100)
-
-        try:
-            await mqtt.async_publish(
-                self.hass, self._mqtt_topic, str(int(mqtt_value)), qos=0, retain=True
-            )
-        except Exception as err:
-            _LOGGER.error("Failed to publish fan curve %s: %s", self._key, err)
+        fan = self.fan
+        curve = {key: self._value(fan, key) for key in CURVE_MODES}
+        curve[self._key] = value
+        for low, high, error in (("min_temp", "max_temp", "temperature_order"), ("min_fan", "max_fan", "fan_order")):
+            if self._key in (low, high) and None not in (curve[low], curve[high]) and curve[high] <= curve[low]:
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key=error,
+                    translation_placeholders={"min": str(curve[low]), "max": str(curve[high])},
+                )
+        await async_publish_setting(
+            self.coordinator, f"curve/{self._key}", percent_to_pwm(value) if self._key in FAN_PARAMS else value
+        )

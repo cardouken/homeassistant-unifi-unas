@@ -133,8 +133,22 @@ def test_set_speed_keeps_speed_without_temps():
 def test_settings_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(fc, "SETTINGS_FILE", tmp_path / "fan.json")
     assert fc.load_settings() == fc.DEFAULT_SETTINGS
-    fc.save_settings(dict(SETTINGS, min_fan=51))
-    assert fc.load_settings() == dict(SETTINGS, min_fan=51)
+    stored = {**fc.DEFAULT_SETTINGS, **SETTINGS, "min_fan": 51}
+    fc.save_settings(stored)
+    assert fc.load_settings() == stored
+
+
+def test_settings_file_from_before_the_speed_topic(tmp_path, monkeypatch):
+    path = tmp_path / "fan.json"
+    monkeypatch.setattr(fc, "SETTINGS_FILE", path)
+    path.write_text(json.dumps(dict(SETTINGS, mode="153")))
+    settings = fc.load_settings()
+    assert (settings["mode"], settings["speed"]) == ("set_speed", 153)
+
+
+def test_set_speed_reaches_the_controller_as_before():
+    assert fc.controller_settings(dict(fc.DEFAULT_SETTINGS, mode="set_speed", speed=90))["mode"] == "90"
+    assert fc.controller_settings(fc.DEFAULT_SETTINGS)["mode"] == "unas_managed"
 
 
 def test_settings_file_ignores_invalid_values(tmp_path, monkeypatch):
