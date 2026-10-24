@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
 from typing import Any
 
 import asyncssh
@@ -44,9 +43,6 @@ from .const import (
     CONF_DEVICE_NAME,
     DEVICE_MODELS,
     HA_SSH_KEY_PATHS,
-    get_mqtt_topics,
-    LAST_CLEANUP_VERSION_KEY,
-    LAST_DEPLOY_VERSION_KEY,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -77,13 +73,9 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 )
 
 
-def _with_bookkeeping(old: Mapping[str, Any], new: dict[str, Any]) -> dict[str, Any]:
-    kept = {k: old[k] for k in (LAST_DEPLOY_VERSION_KEY, LAST_CLEANUP_VERSION_KEY) if k in old}
-    return {**kept, **new}
-
-
 class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 2
+    MINOR_VERSION = 2
 
     @staticmethod
     @callback
@@ -119,7 +111,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.hass.config_entries.async_update_entry(
                     entry,
                     title=f"{device_name} ({user_input[CONF_HOST]})",
-                    data=_with_bookkeeping(entry.data, user_input),
+                    data=user_input,
                 )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reconfigure_successful")
@@ -147,10 +139,6 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     CONF_VERIFY_HOST_KEY,
                     default=entry.data.get(CONF_VERIFY_HOST_KEY, False),
                 ): BooleanSelector(),
-                vol.Optional(CONF_SCAN_INTERVAL,
-                             default=entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)): NumberSelector(
-                    NumberSelectorConfig(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX)
-                ),
             }
         )
 
@@ -186,7 +174,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.hass.config_entries.async_update_entry(
                     entry,
                     title=f"{device_name} ({merged[CONF_HOST]})",
-                    data=_with_bookkeeping(entry.data, merged),
+                    data=merged,
                 )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reconfigure_successful")
@@ -231,10 +219,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input.get(CONF_DEVICE_NAME)
                     or DEVICE_MODELS[user_input[CONF_DEVICE_MODEL]]
                 )
-                return self.async_create_entry(
-                    title=f"{device_name} ({user_input[CONF_HOST]})",
-                    data=user_input,
-                )
+                return self._create_entry(f"{device_name} ({user_input[CONF_HOST]})", user_input)
 
         return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
 
@@ -259,10 +244,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     merged.get(CONF_DEVICE_NAME)
                     or DEVICE_MODELS[merged[CONF_DEVICE_MODEL]]
                 )
-                return self.async_create_entry(
-                    title=f"{device_name} ({merged[CONF_HOST]})",
-                    data=merged,
-                )
+                return self._create_entry(f"{device_name} ({merged[CONF_HOST]})", merged)
 
         schema = vol.Schema({
             vol.Optional(CONF_MQTT_PORT, default=DEFAULT_MQTT_TLS_PORT): NumberSelector(
@@ -271,6 +253,11 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Optional(CONF_MQTT_TLS_INSECURE, default=False): BooleanSelector(),
         })
         return self.async_show_form(step_id="mqtt_tls", data_schema=schema, errors=errors)
+
+    def _create_entry(self, title: str, user_input: dict[str, Any]) -> FlowResult:
+        data = {key: value for key, value in user_input.items() if key != CONF_SCAN_INTERVAL}
+        interval = int(user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
+        return self.async_create_entry(title=title, data=data, options={CONF_SCAN_INTERVAL: interval})
 
     async def _test_ssh(self, host: str, username: str, password: str | None) -> str | None:
         try:
@@ -366,31 +353,16 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class UNASProOptionsFlow(config_entries.OptionsFlow):
-    async def async_step_init(self, user_input):
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
-            from homeassistant.components import mqtt
-
-            new_interval = user_input[CONF_SCAN_INTERVAL]
-            topics = get_mqtt_topics(self.config_entry.entry_id)
-            await mqtt.async_publish(
-                self.hass,
-                f"{topics['control']}/monitor_interval",
-                str(new_interval),
-                qos=0,
-                retain=True,
-            )
-
-            new_data = dict(self.config_entry.data)
-            new_data[CONF_SCAN_INTERVAL] = new_interval
-            self.hass.config_entries.async_update_entry(self.config_entry, data=new_data)
-            await self.hass.config_entries.async_reload(self.config_entry.entry_id)
-            return self.async_create_entry(title="", data={})
+            # applied by the update listener, no reload
+            return self.async_create_entry(data={CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL])})
 
         options_schema = vol.Schema(
             {
                 vol.Required(
                     CONF_SCAN_INTERVAL,
-                    default=self.config_entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+                    default=self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
                 ): NumberSelector(
                     NumberSelectorConfig(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX)),
             }

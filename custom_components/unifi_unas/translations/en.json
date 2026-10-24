@@ -36,7 +36,7 @@
       },
       "reconfigure": {
         "title": "Reconfigure UniFi UNAS",
-        "description": "Update your UniFi UNAS connection settings. The integration will reconnect and redeploy scripts with the new configuration.",
+        "description": "Update your UniFi UNAS connection settings. The integration reconnects, and the scripts on the UNAS are updated if their settings changed.",
         "data": {
           "host": "Host (UNAS IP Address)",
           "username": "UNAS SSH username (root by default)",
@@ -47,8 +47,7 @@
           "mqtt_tls": "Use TLS",
           "device_model": "Device Model",
           "device_name": "Device Name",
-          "verify_host_key": "Verify SSH host key",
-          "scan_interval": "Polling Interval (seconds, 5-60)"
+          "verify_host_key": "Verify SSH host key"
         },
         "data_description": {
           "mqtt_tls": "Only enable if your MQTT broker is configured for TLS (port 8883). Leave off for standard setups.",
@@ -90,7 +89,7 @@
     "step": {
       "init": {
         "title": "UniFi UNAS Options",
-        "description": "Configure sensor polling interval. Lower values provide more frequent updates but may increase system load.",
+        "description": "How often the UNAS publishes its metrics. Lower values update faster but add load on the UNAS. Applied right away, without a restart.",
         "data": {
           "scan_interval": "Polling Interval (seconds, 5-60)"
         }

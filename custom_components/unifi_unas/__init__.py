@@ -41,6 +41,8 @@ from .ssh_manager import BUNDLE_DIR, LEGACY_CLEANUP, SSHManager
 
 _LOGGER = logging.getLogger(__name__)
 
+OBSOLETE_DATA = (CONF_SCAN_INTERVAL, "last_cleanup_version", "last_deploy_version")
+
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
@@ -78,14 +80,24 @@ type UNASConfigEntry = ConfigEntry[UNASRuntime]
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    if entry.version > 2:
+        return False
+
     if entry.version == 1:
         new_data = {**entry.data}
         if CONF_DEVICE_MODEL not in new_data:
             new_data[CONF_DEVICE_MODEL] = DEFAULT_DEVICE_MODEL
             _LOGGER.info("Migrated config entry to version 2, added device model: %s", DEFAULT_DEVICE_MODEL)
 
-        hass.config_entries.async_update_entry(entry, data=new_data, version=2)
-        return True
+        hass.config_entries.async_update_entry(entry, data=new_data, version=2, minor_version=1)
+
+    if entry.minor_version < 2:
+        # the interval is an option now, and the deploy version bookkeeping gave way to file hashes
+        data = {key: value for key, value in entry.data.items() if key not in OBSOLETE_DATA}
+        interval = int(entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
+        options = {**entry.options, CONF_SCAN_INTERVAL: interval}
+        hass.config_entries.async_update_entry(entry, data=data, options=options, minor_version=2)
+        _LOGGER.info("Migrated config entry to version 2.2")
 
     return True
 
@@ -137,17 +149,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool
     entry.async_on_unload(service.async_add_listener(deployer.async_check))
     entry.async_create_background_task(hass, service.async_refresh(), f"{DOMAIN} ssh status")
 
-    topics = get_mqtt_topics(entry.entry_id)
-    scan_interval = entry.data.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
+    await _async_publish_interval(hass, entry)
+    entry.async_on_unload(entry.add_update_listener(_async_publish_interval))
+
+    return True
+
+
+async def _async_publish_interval(hass: HomeAssistant, entry: UNASConfigEntry) -> None:
+    # the NAS daemons pick it up live, nothing to reload or redeploy
+    interval = int(entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
     await mqtt.async_publish(
         hass,
-        f"{topics['control']}/monitor_interval",
-        str(scan_interval),
+        f"{get_mqtt_topics(entry.entry_id)['control']}/monitor_interval",
+        str(interval),
         qos=0,
         retain=True,
     )
-
-    return True
 
 
 async def _clear_retained_mqtt_topics(hass: HomeAssistant, entry_id: str) -> None:

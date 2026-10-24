@@ -1,5 +1,6 @@
 import json
 import logging
+from types import SimpleNamespace
 
 import pytest
 
@@ -136,3 +137,21 @@ def test_device_info_from_the_system_api(monkeypatch):
 def test_device_info_unavailable(monkeypatch, connection):
     monkeypatch.setattr(um.http.client, "HTTPConnection", connection)
     assert um.UNASMonitor(mqtt_enabled=False).get_device_info() is None
+
+
+def interval_message(payload):
+    return SimpleNamespace(topic=um.MONITOR_INTERVAL_TOPIC, payload=payload.encode())
+
+
+@pytest.mark.parametrize("payload,expected", [("10", 10), ("10.0", 10), ("4", 30), ("61", 30), ("x", 30)])
+def test_monitor_interval(monitor, payload, expected):
+    monitor.monitor_interval = 30
+    monitor._on_message(None, None, interval_message(payload))
+    assert monitor.monitor_interval == expected
+
+
+def test_unchanged_interval_is_not_logged(monitor, caplog):
+    caplog.set_level(logging.INFO)
+    monitor.monitor_interval = 30
+    monitor._on_message(None, None, interval_message("30"))
+    assert "Monitor interval" not in caplog.text

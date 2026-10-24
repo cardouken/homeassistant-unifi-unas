@@ -172,7 +172,7 @@ class UNASMonitor:
         if msg.topic == MONITOR_INTERVAL_TOPIC:
             try:
                 new_interval = int(float(msg.payload.decode()))
-                if 5 <= new_interval <= 60:
+                if 5 <= new_interval <= 60 and new_interval != self.monitor_interval:
                     old = self.monitor_interval
                     self.monitor_interval = new_interval
                     logger.info(f"Monitor interval: {old}s -> {new_interval}s")
