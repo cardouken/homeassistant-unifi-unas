@@ -7,8 +7,10 @@ import voluptuous as vol
 from homeassistant import data_entry_flow
 from homeassistant.components.repairs import RepairsFlow
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
 
-from .const import CONF_HOST, CONF_HOST_KEY
+from .const import CONF_HOST, CONF_HOST_KEY, DOMAIN
+from .stale_topics import ISSUE_ID as STALE_TOPICS_ISSUE, async_clear_topics, async_find_stale_topics
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -46,14 +48,36 @@ class HostKeyChangedRepairFlow(RepairsFlow):
         )
 
 
+class StaleTopicsRepairFlow(RepairsFlow):
+    async def async_step_init(
+        self, user_input: dict[str, str] | None = None
+    ) -> data_entry_flow.FlowResult:
+        return await self.async_step_confirm()
+
+    async def async_step_confirm(
+        self, user_input: dict[str, str] | None = None
+    ) -> data_entry_flow.FlowResult:
+        if user_input is None:
+            issue = ir.async_get(self.hass).async_get_issue(DOMAIN, STALE_TOPICS_ISSUE)
+            return self.async_show_form(
+                step_id="confirm",
+                data_schema=vol.Schema({}),
+                description_placeholders=dict(issue.translation_placeholders or {}) if issue else None,
+            )
+        # scanned again, something may have come online since the issue was raised
+        stale = await async_find_stale_topics(self.hass)
+        topics = [topic for root_topics in stale.values() for topic in root_topics]
+        await async_clear_topics(self.hass, topics)
+        _LOGGER.info("Cleared %d retained MQTT topics left by removed installs", len(topics))
+        ir.async_delete_issue(self.hass, DOMAIN, STALE_TOPICS_ISSUE)
+        return self.async_create_entry(title="", data={})
+
+
 async def async_create_fix_flow(
     hass: HomeAssistant,
     issue_id: str,
     data: dict[str, str] | None,
 ) -> RepairsFlow:
-    """Create the fix flow for a repair issue.
-
-    host_key_changed is the only fixable issue this integration raises, and
-    it always carries entry_id, so there's nothing else to dispatch on here.
-    """
+    if issue_id == STALE_TOPICS_ISSUE:
+        return StaleTopicsRepairFlow()
     return HostKeyChangedRepairFlow((data or {}).get("entry_id", ""))

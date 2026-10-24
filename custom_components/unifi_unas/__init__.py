@@ -37,6 +37,7 @@ from .const import (
 from .coordinator import UNASDataCoordinator, UNASServiceCoordinator
 from .deploy import Deployer
 from .reconcile import Reconciler
+from .stale_topics import async_schedule_scan
 from .ssh_manager import BUNDLE_DIR, LEGACY_CLEANUP, SSHManager
 
 _LOGGER = logging.getLogger(__name__)
@@ -151,6 +152,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool
 
     await _async_publish_interval(hass, entry)
     entry.async_on_unload(entry.add_update_listener(_async_publish_interval))
+    async_schedule_scan(hass, entry)
 
     return True
 

@@ -106,6 +106,8 @@ def ssh():
     with (
         patch("custom_components.unifi_unas.SSHManager", FakeSSH),
         patch("custom_components.unifi_unas.coordinator.RETAINED_WAIT", 0),
+        patch("custom_components.unifi_unas.stale_topics.SCAN_DELAY", 0),
+        patch("custom_components.unifi_unas.stale_topics.COLLECT_TIME", 0),
     ):
         yield FakeSSH
 

@@ -119,6 +119,17 @@
           }
         }
       }
+    },
+    "stale_topics": {
+      "title": "Leftover MQTT topics from removed UNAS installs",
+      "fix_flow": {
+        "step": {
+          "confirm": {
+            "title": "Clear leftover MQTT topics",
+            "description": "Your MQTT broker still keeps {count} retained topics under {roots}. They were left behind by UniFi UNAS installs that have since been removed (versions before 0.10 could leave an `offline` status behind), and nothing is publishing to them.\n\nSelect **Submit** to clear them. Skip this if another Home Assistant instance uses this integration with the same broker, since its topics would show up here while its NAS is offline."
+          }
+        }
+      }
     }
   }
 }
