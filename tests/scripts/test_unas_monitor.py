@@ -116,13 +116,17 @@ SYSTEM = {"hardware": {
 }}
 
 
-def test_device_info_from_the_system_api(monkeypatch):
+def test_device_info_from_the_system_api(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(um.http.client, "HTTPConnection", fake_connection(body=json_body(SYSTEM), calls=calls))
+    table = tmp_path / "uidb.json"
+    table.write_text(json.dumps({"devices": [{"sysid": "ea51", "sku": "UNAS-Pro", "product": {"abbrev": "UNAS Pro"}}]}))
+    monkeypatch.setattr(um, "UIDB_FILE", table)
     mon = um.UNASMonitor(mqtt_enabled=False)
     info = mon.get_device_info()
     assert info == {
         "name": "UniFi Network Attached Storage Pro", "shortname": "UNASPRO", "sysid": "ea51",
+        "product": "UNAS Pro", "sku": "UNAS-Pro",
         "serial": "0cea14c0c079", "mac": "0CEA14C0C079", "hw_revision": 960263, "firmware": "6.0.11",
     }
     assert mon.get_device_info() == info
@@ -155,3 +159,20 @@ def test_unchanged_interval_is_not_logged(monitor, caplog):
     monitor.monitor_interval = 30
     monitor._on_message(None, None, interval_message("30"))
     assert "Monitor interval" not in caplog.text
+
+
+def test_product_name_comes_from_the_unifi_device_table(tmp_path, monkeypatch):
+    table = tmp_path / "uidb.json"
+    table.write_text(json.dumps({"devices": [
+        {"sysid": "ea63", "sku": "UNAS-Pro-8", "product": {"abbrev": "UNAS Pro 8", "name": "UNAS Pro 8"}},
+        {"sysid": "ea51", "sku": "UNAS-Pro", "product": {"abbrev": "UNAS Pro", "name": "UNAS Pro"}},
+    ]}))
+    monkeypatch.setattr(um, "UIDB_FILE", table)
+    assert um.product_info("ea51") == {"abbrev": "UNAS Pro", "name": "UNAS Pro", "sku": "UNAS-Pro"}
+    assert um.product_info("ffff") == {}
+    assert um.product_info(None) == {}
+
+
+def test_missing_device_table_gives_no_product(tmp_path, monkeypatch):
+    monkeypatch.setattr(um, "UIDB_FILE", tmp_path / "missing.json")
+    assert um.product_info("ea51") == {}

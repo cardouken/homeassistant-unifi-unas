@@ -30,12 +30,12 @@ from .const import (
     DEFAULT_SCAN_INTERVAL,
     DEFAULT_DEVICE_MODEL,
     DEFAULT_MQTT_PORT,
-    get_device_info,
     get_mqtt_root,
     get_mqtt_topics,
 )
 from .coordinator import UNASDataCoordinator, UNASServiceCoordinator
 from .deploy import Deployer
+from .devices import DeviceSync, async_register_main_device
 from .reconcile import Reconciler
 from .stale_topics import async_schedule_scan
 from .ssh_manager import BUNDLE_DIR, LEGACY_CLEANUP, SSHManager
@@ -134,17 +134,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool
 
     await data.async_start()
 
-    device_name, device_model = get_device_info(entry.data)
-    dr.async_get(hass).async_get_or_create(
-        config_entry_id=entry.entry_id,
-        identifiers={(DOMAIN, entry.entry_id)},
-        name=device_name,
-        manufacturer="Ubiquiti",
-        model=device_model,
-    )
+    async_register_main_device(hass, entry, data.data)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     reconciler.async_start()
+    DeviceSync(hass, entry, data).async_start()
 
     # SSH never blocks setup, the MQTT entities work without it
     entry.async_on_unload(service.async_add_listener(deployer.async_check))

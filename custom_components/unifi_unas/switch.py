@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import UNASConfigEntry
-from .const import DOMAIN, get_backup_device_info
+from .devices import backup_device
 from .coordinator import UNASServiceCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class BackupScheduleSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_name = "Schedule enabled"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_schedule_enabled"
         self._attr_icon = "mdi:calendar-clock"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
+        self._attr_device_info = backup_device(coordinator.hass, coordinator.entry, task)
 
     @property
     def available(self):

@@ -19,7 +19,6 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
 from . import UNASConfigEntry
 from .const import (
@@ -29,10 +28,9 @@ from .const import (
     DOMAIN,
     format_remote_type,
     format_schedule,
-    get_backup_device_info,
-    get_device_info,
 )
 from .coordinator import UNASDataCoordinator, UNASServiceCoordinator
+from .devices import backup_device, drive_device, main_device, share_device
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -365,13 +363,7 @@ class UNASSensor(CoordinatorEntity, SensorEntity):
             elif unit == "MiB":
                 self._attr_suggested_unit_of_measurement = UnitOfInformation.GIBIBYTES
 
-        device_name, device_model = get_device_info(coordinator.entry.data)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.entry.entry_id)},
-            name=device_name,
-            manufacturer="Ubiquiti",
-            model=device_model,
-        )
+        self._attr_device_info = main_device(coordinator.entry)
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -414,13 +406,7 @@ class UNASFanCurveVisualizationSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{coordinator.entry.entry_id}_fan_curve_viz"
         self._attr_icon = "mdi:chart-line"
 
-        device_name, device_model = get_device_info(coordinator.entry.data)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.entry.entry_id)},
-            name=device_name,
-            manufacturer="Ubiquiti",
-            model=device_model,
-        )
+        self._attr_device_info = main_device(coordinator.entry)
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -517,18 +503,8 @@ class UNASNVMeSensor(CoordinatorEntity, SensorEntity):
         if device_class == SensorDeviceClass.TEMPERATURE:
             self._attr_suggested_display_precision = 0
 
-        mqtt_data = coordinator.mqtt_client.get_data()
-        model = mqtt_data.get(f"unas_nvme_{nvme_slot}_model", "Unknown")
-        serial = mqtt_data.get(f"unas_nvme_{nvme_slot}_serial", "")
-
-        device_name, _ = get_device_info(coordinator.entry.data)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{coordinator.entry.entry_id}_nvme_{nvme_slot}")},
-            name=f"{device_name} NVMe {nvme_slot}",
-            manufacturer=model.split()[0] if model != "Unknown" else "Unknown",
-            model=model,
-            serial_number=serial,
-            via_device=(DOMAIN, coordinator.entry.entry_id),
+        self._attr_device_info = drive_device(
+            coordinator.hass, coordinator.entry, "nvme", nvme_slot, coordinator.mqtt_client.get_data()
         )
 
     @callback
@@ -577,18 +553,8 @@ class UNASDriveSensor(CoordinatorEntity, SensorEntity):
         if device_class == SensorDeviceClass.TEMPERATURE:
             self._attr_suggested_display_precision = 0
 
-        mqtt_data = coordinator.mqtt_client.get_data()
-        model = mqtt_data.get(f"unas_hdd_{bay_num}_model", "Unknown")
-        serial = mqtt_data.get(f"unas_hdd_{bay_num}_serial", "")
-
-        device_name, _ = get_device_info(coordinator.entry.data)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{coordinator.entry.entry_id}_hdd_{bay_num}")},
-            name=f"{device_name} HDD {bay_num}",
-            manufacturer=model.split()[0] if model != "Unknown" else "Unknown",
-            model=model,
-            serial_number=serial,
-            via_device=(DOMAIN, coordinator.entry.entry_id),
+        self._attr_device_info = drive_device(
+            coordinator.hass, coordinator.entry, "bays", bay_num, coordinator.mqtt_client.get_data()
         )
 
     @callback
@@ -638,13 +604,7 @@ class UNASShareSensor(CoordinatorEntity, SensorEntity):
         if device_class == SensorDeviceClass.DATA_SIZE and unit == "GB":
             self._attr_suggested_unit_of_measurement = UnitOfInformation.TERABYTES
 
-        device_name, _ = get_device_info(coordinator.entry.data)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"{coordinator.entry.entry_id}_share_{share_name}")},
-            name=f"{device_name} Share: {share_name}",
-            entry_type=DeviceEntryType.SERVICE,
-            via_device=(DOMAIN, coordinator.entry.entry_id),
-        )
+        self._attr_device_info = share_device(coordinator.hass, coordinator.entry, share_name)
 
     @callback
     def _handle_coordinator_update(self) -> None:
@@ -700,7 +660,7 @@ class UNASBackupStatusSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Status"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_status"
         self._attr_icon = "mdi:cloud-sync"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
+        self._attr_device_info = backup_device(coordinator.hass, coordinator.entry, task)
 
     @property
     def available(self):
@@ -753,7 +713,7 @@ class UNASBackupLastRunSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_last_run"
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_icon = "mdi:clock-check"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
+        self._attr_device_info = backup_device(coordinator.hass, coordinator.entry, task)
 
     @property
     def available(self):
@@ -783,7 +743,7 @@ class UNASBackupNextRunSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_next_run"
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_icon = "mdi:clock-outline"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
+        self._attr_device_info = backup_device(coordinator.hass, coordinator.entry, task)
 
     @property
     def available(self):
@@ -817,7 +777,7 @@ class UNASBackupDurationSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.DURATION
         self._attr_native_unit_of_measurement = UnitOfTime.SECONDS
         self._attr_icon = "mdi:timer-outline"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
+        self._attr_device_info = backup_device(coordinator.hass, coordinator.entry, task)
         self._cached_duration = None
 
     @property
@@ -856,7 +816,7 @@ class UNASBackupDestinationSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Destination"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_destination"
         self._attr_icon = "mdi:cloud-upload"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
+        self._attr_device_info = backup_device(coordinator.hass, coordinator.entry, task)
 
     @property
     def available(self):
@@ -883,7 +843,7 @@ class UNASBackupSourceSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Source"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_source"
         self._attr_icon = "mdi:folder-multiple"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
+        self._attr_device_info = backup_device(coordinator.hass, coordinator.entry, task)
 
     @property
     def available(self):
@@ -920,7 +880,7 @@ class UNASBackupScheduleSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Schedule"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_schedule"
         self._attr_icon = "mdi:calendar-clock"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
+        self._attr_device_info = backup_device(coordinator.hass, coordinator.entry, task)
 
     @property
     def available(self):
@@ -942,7 +902,7 @@ class UNASBackupNameSensor(CoordinatorEntity, SensorEntity):
         self._attr_name = "Task name"
         self._attr_unique_id = f"{coordinator.entry.entry_id}_backup_{self._task_id}_name"
         self._attr_icon = "mdi:tag"
-        self._attr_device_info = get_backup_device_info(coordinator.entry.entry_id, coordinator.entry.data, task)
+        self._attr_device_info = backup_device(coordinator.hass, coordinator.entry, task)
 
     @property
     def available(self):

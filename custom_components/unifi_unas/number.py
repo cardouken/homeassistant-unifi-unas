@@ -7,12 +7,12 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.helpers.restore_state import RestoreEntity
-from homeassistant.helpers.device_registry import DeviceInfo
 
 from homeassistant.components import mqtt
 
 from . import UNASConfigEntry
-from .const import DOMAIN, get_device_info, get_mqtt_topics
+from .const import get_mqtt_topics
+from .devices import main_device
 from .coordinator import UNASDataCoordinator
 from .fan_mode import FanModeMixin
 
@@ -69,13 +69,7 @@ class UNASFanSpeedNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreE
         self._current_value = None
         self._unsubscribe_speed = None
 
-        device_name, device_model = get_device_info(coordinator.entry.data)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.entry.entry_id)},
-            name=device_name,
-            manufacturer="Ubiquiti",
-            model=device_model,
-        )
+        self._attr_device_info = main_device(coordinator.entry)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
@@ -184,13 +178,7 @@ class UNASFanCurveNumber(FanModeMixin, CoordinatorEntity, NumberEntity, RestoreE
 
         self._mqtt_topic = f"{self._topics['control']}/fan/curve/{key}"
 
-        device_name, device_model = get_device_info(coordinator.entry.data)
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, coordinator.entry.entry_id)},
-            name=device_name,
-            manufacturer="Ubiquiti",
-            model=device_model,
-        )
+        self._attr_device_info = main_device(coordinator.entry)
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()

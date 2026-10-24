@@ -35,6 +35,8 @@ MONITOR_INTERVAL_TOPIC = f"{MQTT_CONTROL}/monitor_interval"
 REPUBLISH_INTERVAL = 60
 SHARE_CACHE_TTL = 300
 DEVICE_INFO_TTL = 3600
+# UniFi's own device table, maps the sysid to the product name ("UNAS Pro") and SKU
+UIDB_FILE = Path('/usr/share/unifi-core/app/data/uidb.json')
 HEARTBEAT_INTERVAL = 600
 _UNSET = object()
 
@@ -101,6 +103,19 @@ BAY_MAPPINGS = {
 }
 
 ATA_TO_BAY = BAY_MAPPINGS.get(DEVICE_MODEL)
+
+
+def product_info(sysid):
+    if not sysid:
+        return {}
+    try:
+        devices = json.loads(UIDB_FILE.read_text()).get('devices') or []
+    except (OSError, ValueError, AttributeError):
+        return {}
+    for device in devices:
+        if isinstance(device, dict) and device.get('sysid') == sysid:
+            return dict(device.get('product') or {}, sku=device.get('sku'))
+    return {}
 
 
 class UNASMonitor:
@@ -286,10 +301,14 @@ class UNASMonitor:
         if not hardware:
             return None
         sysid = hardware.get('sysid')
+        sysid = f"{sysid:04x}" if isinstance(sysid, int) else None
+        product = product_info(sysid)
         info = {
             'name': hardware.get('name'),
             'shortname': hardware.get('shortname'),
-            'sysid': f"{sysid:04x}" if isinstance(sysid, int) else None,
+            'product': product.get('abbrev') or product.get('name'),
+            'sku': product.get('sku'),
+            'sysid': sysid,
             'serial': hardware.get('serialno'),
             'mac': hardware.get('mac'),
             'hw_revision': hardware.get('hwrev'),
