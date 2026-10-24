@@ -10,6 +10,7 @@ import asyncssh
 from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.helpers.event import async_track_time_interval
@@ -164,6 +165,9 @@ class UNASServiceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # not an outage, it repeats until the key is re-pinned through the repair
             raise_host_key_repair(self.hass, self.entry)
             raise UpdateFailed(f"SSH host key verification failed for {host}: {err}") from err
+        except asyncssh.PermissionDenied as err:
+            # starts a reauth flow and stops polling until the entry is reloaded
+            raise ConfigEntryAuthFailed(f"The UNAS at {host} rejected the SSH login: {err}") from err
         except Exception as err:
             self._track_outage(host)
             raise UpdateFailed(f"Cannot check the UNAS at {host} over SSH: {err}") from err

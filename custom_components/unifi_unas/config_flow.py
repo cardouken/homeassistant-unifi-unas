@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import asyncssh
@@ -254,6 +255,31 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         })
         return self.async_show_form(step_id="mqtt_tls", data_schema=schema, errors=errors)
 
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+        if user_input is not None:
+            password = user_input.get(CONF_PASSWORD) or ""
+            if error_key := await self._test_ssh(entry.data[CONF_HOST], user_input[CONF_USERNAME], password):
+                errors["base"] = error_key
+            else:
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={CONF_USERNAME: user_input[CONF_USERNAME], CONF_PASSWORD: password}
+                )
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({
+                vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, DEFAULT_USERNAME)): str,
+                vol.Optional(CONF_PASSWORD): str,
+            }),
+            errors=errors,
+            description_placeholders={"host": entry.data[CONF_HOST]},
+        )
+
     def _create_entry(self, title: str, user_input: dict[str, Any]) -> FlowResult:
         data = {key: value for key, value in user_input.items() if key != CONF_SCAN_INTERVAL}
         interval = int(user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
@@ -286,6 +312,8 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if result.stdout.strip() != "test":
                 return "unknown"
             return None
+        except asyncssh.PermissionDenied:
+            return "invalid_auth"
         except asyncssh.Error:
             return "cannot_connect"
         except asyncio.TimeoutError:

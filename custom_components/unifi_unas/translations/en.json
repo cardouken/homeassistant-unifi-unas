@@ -66,6 +66,14 @@
         "data_description": {
           "mqtt_tls_insecure": "Enable if your MQTT broker uses a self-signed certificate."
         }
+      },
+      "reauth_confirm": {
+        "title": "Log in to the UniFi UNAS again",
+        "description": "The UniFi UNAS at {host} rejected the SSH login, for example after a firmware update reset the password. Monitoring keeps running over MQTT, but deploys, service status and backups need SSH.",
+        "data": {
+          "username": "UNAS SSH username (root by default)",
+          "password": "UNAS SSH password (Leave blank if HA SSH keys are configured on the UNAS)"
+        }
       }
     },
     "error": {
@@ -77,12 +85,14 @@
       "mqtt_library_missing": "MQTT library not available. Please restart Home Assistant.",
       "model_changed": "Device model cannot be changed during reconfiguration. Please delete and re-add the integration to change the device model.",
       "mqtt_tls_verify_failed": "TLS certificate verification failed. Enable 'Allow untrusted certificate' if your broker uses a self-signed certificate.",
-      "unknown": "Unexpected error occurred. Please check the logs."
+      "unknown": "Unexpected error occurred. Please check the logs.",
+      "invalid_auth": "The UNAS rejected the SSH login. Check the username and password, or that the Home Assistant SSH key is in the UNAS authorized keys."
     },
     "abort": {
       "already_configured": "This UniFi UNAS is already configured.",
       "mqtt_required": "MQTT integration must be installed and configured before setting up UniFi UNAS. Please add the MQTT integration first, then try again.",
-      "reconfigure_successful": "Configuration updated successfully. The integration is reconnecting with the new settings."
+      "reconfigure_successful": "Configuration updated successfully. The integration is reconnecting with the new settings.",
+      "reauth_successful": "Logged in again, the integration is reloading."
     }
   },
   "options": {
@@ -103,7 +113,7 @@
     },
     "ssh_unavailable": {
       "title": "UNAS SSH connection unavailable",
-      "description": "Home Assistant has been unable to connect to your UniFi UNAS at `{host}` via SSH for over 10 minutes. Without SSH, the integration cannot check or redeploy monitoring scripts.\n\nThis can happen after a firmware upgrade if the SSH password was reset. Verify that you can SSH into the UNAS manually, then reload the integration.\n\nIf the password changed, update it via the integration's reconfigure option."
+      "description": "Home Assistant has been unable to reach your UniFi UNAS at `{host}` over SSH for over 10 minutes. Monitoring continues over MQTT, but the integration cannot check, update or redeploy the scripts on the UNAS, and backup controls are unavailable.\n\nCheck that the UNAS is powered on and reachable, and that SSH is enabled. If the UNAS rejects the login instead, Home Assistant asks for the credentials again."
     },
     "deploy_failed": {
       "title": "Could not deploy the UNAS scripts",
