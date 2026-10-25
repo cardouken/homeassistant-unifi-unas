@@ -1,0 +1,1426 @@
+{
+ "UNAS_PRO": {
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25": {
+   "device_class": null,
+   "entity_id": "button.unas_backup_b2_backup_run_backup",
+   "icon": "mdi:cloud-upload",
+   "name": "Run backup",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_destination": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_destination",
+   "icon": "mdi:cloud-upload",
+   "name": "Destination",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_duration": {
+   "device_class": "duration",
+   "entity_id": "sensor.unas_backup_b2_backup_last_run_duration",
+   "icon": "mdi:timer-outline",
+   "name": "Last run duration",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "s"
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_last_run": {
+   "device_class": "timestamp",
+   "entity_id": "sensor.unas_backup_b2_backup_last_run",
+   "icon": "mdi:clock-check",
+   "name": "Last run",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_name": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_task_name",
+   "icon": "mdi:tag",
+   "name": "Task name",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_next_run": {
+   "device_class": "timestamp",
+   "entity_id": "sensor.unas_backup_b2_backup_next_run",
+   "icon": "mdi:clock-outline",
+   "name": "Next run",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_schedule": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_schedule",
+   "icon": "mdi:calendar-clock",
+   "name": "Schedule",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_schedule_enabled": {
+   "device_class": null,
+   "entity_id": "switch.unas_backup_b2_backup_schedule_enabled",
+   "icon": "mdi:calendar-clock",
+   "name": "Schedule enabled",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_source": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_source",
+   "icon": "mdi:folder-multiple",
+   "name": "Source",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_status": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_status",
+   "icon": "mdi:cloud-sync",
+   "name": "Status",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_control_running": {
+   "device_class": "running",
+   "entity_id": "binary_sensor.unas_fan_control_service",
+   "icon": null,
+   "name": "Fan Control Service",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_curve_max_fan": {
+   "device_class": null,
+   "entity_id": "number.unas_max_fan_speed",
+   "icon": "mdi:fan-speed-3",
+   "name": "Max Fan Speed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "fan_curve_max_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_max_temperature",
+   "icon": "mdi:thermometer-high",
+   "name": "Max Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_min_fan": {
+   "device_class": null,
+   "entity_id": "number.unas_min_fan_speed",
+   "icon": "mdi:fan-speed-1",
+   "name": "Min Fan Speed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "fan_curve_min_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_min_temperature",
+   "icon": "mdi:thermometer-low",
+   "name": "Min Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_target_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_target_temperature",
+   "icon": "mdi:thermometer-check",
+   "name": "Target Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_viz": {
+   "device_class": null,
+   "entity_id": "sensor.unas_fan_curve",
+   "icon": "mdi:chart-line",
+   "name": "Fan Curve",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_mode": {
+   "device_class": null,
+   "entity_id": "select.unas_fan_mode",
+   "icon": "mdi:fan-auto",
+   "name": "Fan Mode",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_speed_control": {
+   "device_class": null,
+   "entity_id": "number.unas_fan_speed",
+   "icon": "mdi:fan-auto",
+   "name": "Fan Speed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "monitor_running": {
+   "device_class": "running",
+   "entity_id": "binary_sensor.unas_monitor_service",
+   "icon": null,
+   "name": "Monitor Service",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "reboot": {
+   "device_class": null,
+   "entity_id": "button.unas_reboot",
+   "icon": "mdi:restart",
+   "name": "Reboot",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "reinstall_scripts": {
+   "device_class": null,
+   "entity_id": "button.unas_reinstall_scripts",
+   "icon": "mdi:cog-refresh",
+   "name": "Reinstall Scripts",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "response_speed": {
+   "device_class": null,
+   "entity_id": "select.unas_response_speed",
+   "icon": "mdi:speedometer",
+   "name": "Response Speed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "scripts_installed": {
+   "device_class": "running",
+   "entity_id": "binary_sensor.unas_scripts_installed",
+   "icon": null,
+   "name": "Scripts Installed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "shutdown": {
+   "device_class": null,
+   "entity_id": "button.unas_shutdown",
+   "icon": "mdi:power",
+   "name": "Shutdown",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "temp_metric": {
+   "device_class": null,
+   "entity_id": "select.unas_temperature_metric",
+   "icon": "mdi:thermometer-lines",
+   "name": "Temperature Metric",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_cpu_temp": {
+   "device_class": "temperature",
+   "entity_id": "sensor.unas_cpu_temperature",
+   "icon": null,
+   "name": "CPU Temperature",
+   "precision": 0,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "unas_cpu_usage": {
+   "device_class": null,
+   "entity_id": "sensor.unas_cpu_usage",
+   "icon": "mdi:chip",
+   "name": "CPU Usage",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_disk_read": {
+   "device_class": "data_rate",
+   "entity_id": "sensor.unas_disk_read",
+   "icon": "mdi:download",
+   "name": "Disk Read",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "MB/s"
+  },
+  "unas_disk_write": {
+   "device_class": "data_rate",
+   "entity_id": "sensor.unas_disk_write",
+   "icon": "mdi:upload",
+   "name": "Disk Write",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "MB/s"
+  },
+  "unas_drive_version": {
+   "device_class": null,
+   "entity_id": "sensor.unas_unifi_drive_version",
+   "icon": "mdi:information",
+   "name": "UniFi Drive Version",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_fan_speed": {
+   "device_class": null,
+   "entity_id": "sensor.unas_fan_speed_pwm",
+   "icon": "mdi:fan",
+   "name": "Fan Speed (PWM)",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_fan_speed_percent": {
+   "device_class": null,
+   "entity_id": "sensor.unas_fan_speed_percent",
+   "icon": "mdi:fan",
+   "name": "Fan Speed (Percent)",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_hdd_1_bad_sectors": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_bad_sectors",
+   "icon": "mdi:alert-circle",
+   "name": "Bad Sectors",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_firmware": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_firmware",
+   "icon": "mdi:information",
+   "name": "Firmware",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_model": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_model",
+   "icon": "mdi:harddisk",
+   "name": "Model",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_power_on_hours": {
+   "device_class": "duration",
+   "entity_id": "sensor.unas_hdd_1_power_on_hours",
+   "icon": null,
+   "name": "Power-On Hours",
+   "precision": 2,
+   "state_class": "total_increasing",
+   "suggested_unit": null,
+   "unit": "h"
+  },
+  "unas_hdd_1_rpm": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_rpm",
+   "icon": "mdi:speedometer",
+   "name": "RPM",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "rpm"
+  },
+  "unas_hdd_1_serial": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_serial_number",
+   "icon": "mdi:identifier",
+   "name": "Serial Number",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_status": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_status",
+   "icon": "mdi:check-circle",
+   "name": "Status",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_temperature": {
+   "device_class": "temperature",
+   "entity_id": "sensor.unas_hdd_1_temperature",
+   "icon": null,
+   "name": "Temperature",
+   "precision": 0,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "unas_hdd_1_total_size": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_hdd_1_total_size",
+   "icon": null,
+   "name": "Total Size",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "TB"
+  },
+  "unas_memory_total": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_memory_total",
+   "icon": null,
+   "name": "Memory Total",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": "GiB",
+   "unit": "GiB"
+  },
+  "unas_memory_usage": {
+   "device_class": null,
+   "entity_id": "sensor.unas_memory_usage",
+   "icon": "mdi:memory",
+   "name": "Memory Usage",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_memory_used": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_memory_used",
+   "icon": null,
+   "name": "Memory Used",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": "GiB",
+   "unit": "GiB"
+  },
+  "unas_nfs_mounts": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nfs_mounts",
+   "icon": "mdi:folder-network",
+   "name": "NFS Mounts",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_available_spare": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_available_spare",
+   "icon": "mdi:database",
+   "name": "Available Spare",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_nvme_0_firmware": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_firmware",
+   "icon": "mdi:information",
+   "name": "Firmware",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_media_errors": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_media_errors",
+   "icon": "mdi:alert-circle",
+   "name": "Media Errors",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_model": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_model",
+   "icon": "mdi:expansion-card",
+   "name": "Model",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_percentage_used": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_percentage_used",
+   "icon": "mdi:chart-line",
+   "name": "Percentage Used",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_nvme_0_power_on_hours": {
+   "device_class": "duration",
+   "entity_id": "sensor.unas_nvme_0_power_on_hours",
+   "icon": null,
+   "name": "Power-On Hours",
+   "precision": 2,
+   "state_class": "total_increasing",
+   "suggested_unit": null,
+   "unit": "h"
+  },
+  "unas_nvme_0_serial": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_serial_number",
+   "icon": "mdi:identifier",
+   "name": "Serial Number",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_status": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_status",
+   "icon": "mdi:check-circle",
+   "name": "Status",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_temperature": {
+   "device_class": "temperature",
+   "entity_id": "sensor.unas_nvme_0_temperature",
+   "icon": null,
+   "name": "Temperature",
+   "precision": 0,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "unas_nvme_0_total_size": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_nvme_0_total_size",
+   "icon": null,
+   "name": "Total Size",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "TB"
+  },
+  "unas_nvme_0_unsafe_shutdowns": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_unsafe_shutdowns",
+   "icon": "mdi:power",
+   "name": "Unsafe Shutdowns",
+   "precision": null,
+   "state_class": "total_increasing",
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_os_version": {
+   "device_class": null,
+   "entity_id": "sensor.unas_unifi_os_version",
+   "icon": "mdi:information",
+   "name": "UniFi OS Version",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_pool1_available": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_storage_pool_1_available",
+   "icon": null,
+   "name": "Storage Pool 1 Available",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": "TB",
+   "unit": "TB"
+  },
+  "unas_pool1_raid_level": {
+   "device_class": null,
+   "entity_id": "sensor.unas_storage_pool_1_raid_level",
+   "icon": "mdi:database",
+   "name": "Storage Pool 1 RAID Level",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_pool1_size": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_storage_pool_1_size",
+   "icon": null,
+   "name": "Storage Pool 1 Size",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": "TB",
+   "unit": "TB"
+  },
+  "unas_pool1_status": {
+   "device_class": null,
+   "entity_id": "sensor.unas_storage_pool_1_status",
+   "icon": "mdi:check-circle",
+   "name": "Storage Pool 1 Status",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_pool1_usage": {
+   "device_class": null,
+   "entity_id": "sensor.unas_storage_pool_1_usage",
+   "icon": "mdi:harddisk",
+   "name": "Storage Pool 1 Usage",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_pool1_used": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_storage_pool_1_used",
+   "icon": null,
+   "name": "Storage Pool 1 Used",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": "TB",
+   "unit": "TB"
+  },
+  "unas_share_plex_encryption": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_encryption",
+   "icon": "mdi:lock",
+   "name": "Encryption",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_member_count": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_members",
+   "icon": "mdi:account-multiple",
+   "name": "Members",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_pool": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_storage_pool",
+   "icon": "mdi:database",
+   "name": "Storage Pool",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_quota": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_quota",
+   "icon": "mdi:folder-lock",
+   "name": "Quota",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_snapshot_enabled": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_snapshots",
+   "icon": "mdi:camera",
+   "name": "Snapshots",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_usage": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_share_plex_usage",
+   "icon": "mdi:folder",
+   "name": "Usage",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": "TB",
+   "unit": "TB"
+  },
+  "unas_smb_connections": {
+   "device_class": null,
+   "entity_id": "sensor.unas_smb_connections",
+   "icon": "mdi:server-network",
+   "name": "SMB Connections",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_uptime": {
+   "device_class": "timestamp",
+   "entity_id": "sensor.unas_uptime",
+   "icon": null,
+   "name": "Uptime",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  }
+ },
+ "UNVR": {
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25": {
+   "device_class": null,
+   "entity_id": "button.unas_backup_b2_backup_run_backup",
+   "icon": "mdi:cloud-upload",
+   "name": "Run backup",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_destination": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_destination",
+   "icon": "mdi:cloud-upload",
+   "name": "Destination",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_duration": {
+   "device_class": "duration",
+   "entity_id": "sensor.unas_backup_b2_backup_last_run_duration",
+   "icon": "mdi:timer-outline",
+   "name": "Last run duration",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "s"
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_last_run": {
+   "device_class": "timestamp",
+   "entity_id": "sensor.unas_backup_b2_backup_last_run",
+   "icon": "mdi:clock-check",
+   "name": "Last run",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_name": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_task_name",
+   "icon": "mdi:tag",
+   "name": "Task name",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_next_run": {
+   "device_class": "timestamp",
+   "entity_id": "sensor.unas_backup_b2_backup_next_run",
+   "icon": "mdi:clock-outline",
+   "name": "Next run",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_schedule": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_schedule",
+   "icon": "mdi:calendar-clock",
+   "name": "Schedule",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_schedule_enabled": {
+   "device_class": null,
+   "entity_id": "switch.unas_backup_b2_backup_schedule_enabled",
+   "icon": "mdi:calendar-clock",
+   "name": "Schedule enabled",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_source": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_source",
+   "icon": "mdi:folder-multiple",
+   "name": "Source",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "backup_198597d5-df3e-4a71-8a96-f9f816045b25_status": {
+   "device_class": null,
+   "entity_id": "sensor.unas_backup_b2_backup_status",
+   "icon": "mdi:cloud-sync",
+   "name": "Status",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_control_running": {
+   "device_class": "running",
+   "entity_id": "binary_sensor.unas_fan_control_service",
+   "icon": null,
+   "name": "Fan Control Service",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_curve_max_fan": {
+   "device_class": null,
+   "entity_id": "number.unas_max_fan_speed",
+   "icon": "mdi:fan-speed-3",
+   "name": "Max Fan Speed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "fan_curve_max_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_max_temperature",
+   "icon": "mdi:thermometer-high",
+   "name": "Max Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_min_fan": {
+   "device_class": null,
+   "entity_id": "number.unas_min_fan_speed",
+   "icon": "mdi:fan-speed-1",
+   "name": "Min Fan Speed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "fan_curve_min_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_min_temperature",
+   "icon": "mdi:thermometer-low",
+   "name": "Min Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_target_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_target_temperature",
+   "icon": "mdi:thermometer-check",
+   "name": "Target Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_viz": {
+   "device_class": null,
+   "entity_id": "sensor.unas_fan_curve",
+   "icon": "mdi:chart-line",
+   "name": "Fan Curve",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_mode": {
+   "device_class": null,
+   "entity_id": "select.unas_fan_mode",
+   "icon": "mdi:fan-auto",
+   "name": "Fan Mode",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_speed_control": {
+   "device_class": null,
+   "entity_id": "number.unas_fan_speed",
+   "icon": "mdi:fan-auto",
+   "name": "Fan Speed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "monitor_running": {
+   "device_class": "running",
+   "entity_id": "binary_sensor.unas_monitor_service",
+   "icon": null,
+   "name": "Monitor Service",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "reboot": {
+   "device_class": null,
+   "entity_id": "button.unas_reboot",
+   "icon": "mdi:restart",
+   "name": "Reboot",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "reinstall_scripts": {
+   "device_class": null,
+   "entity_id": "button.unas_reinstall_scripts",
+   "icon": "mdi:cog-refresh",
+   "name": "Reinstall Scripts",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "response_speed": {
+   "device_class": null,
+   "entity_id": "select.unas_response_speed",
+   "icon": "mdi:speedometer",
+   "name": "Response Speed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "scripts_installed": {
+   "device_class": "running",
+   "entity_id": "binary_sensor.unas_scripts_installed",
+   "icon": null,
+   "name": "Scripts Installed",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "shutdown": {
+   "device_class": null,
+   "entity_id": "button.unas_shutdown",
+   "icon": "mdi:power",
+   "name": "Shutdown",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "temp_metric": {
+   "device_class": null,
+   "entity_id": "select.unas_temperature_metric",
+   "icon": "mdi:thermometer-lines",
+   "name": "Temperature Metric",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_cpu_temp": {
+   "device_class": "temperature",
+   "entity_id": "sensor.unas_cpu_temperature",
+   "icon": null,
+   "name": "CPU Temperature",
+   "precision": 0,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "unas_cpu_usage": {
+   "device_class": null,
+   "entity_id": "sensor.unas_cpu_usage",
+   "icon": "mdi:chip",
+   "name": "CPU Usage",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_disk_read": {
+   "device_class": "data_rate",
+   "entity_id": "sensor.unas_disk_read",
+   "icon": "mdi:download",
+   "name": "Disk Read",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "MB/s"
+  },
+  "unas_disk_write": {
+   "device_class": "data_rate",
+   "entity_id": "sensor.unas_disk_write",
+   "icon": "mdi:upload",
+   "name": "Disk Write",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "MB/s"
+  },
+  "unas_fan_speed": {
+   "device_class": null,
+   "entity_id": "sensor.unas_fan_speed_pwm",
+   "icon": "mdi:fan",
+   "name": "Fan Speed (PWM)",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_fan_speed_percent": {
+   "device_class": null,
+   "entity_id": "sensor.unas_fan_speed_percent",
+   "icon": "mdi:fan",
+   "name": "Fan Speed (Percent)",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_hdd_1_bad_sectors": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_bad_sectors",
+   "icon": "mdi:alert-circle",
+   "name": "Bad Sectors",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_firmware": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_firmware",
+   "icon": "mdi:information",
+   "name": "Firmware",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_model": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_model",
+   "icon": "mdi:harddisk",
+   "name": "Model",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_power_on_hours": {
+   "device_class": "duration",
+   "entity_id": "sensor.unas_hdd_1_power_on_hours",
+   "icon": null,
+   "name": "Power-On Hours",
+   "precision": 2,
+   "state_class": "total_increasing",
+   "suggested_unit": null,
+   "unit": "h"
+  },
+  "unas_hdd_1_rpm": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_rpm",
+   "icon": "mdi:speedometer",
+   "name": "RPM",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "rpm"
+  },
+  "unas_hdd_1_serial": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_serial_number",
+   "icon": "mdi:identifier",
+   "name": "Serial Number",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_status": {
+   "device_class": null,
+   "entity_id": "sensor.unas_hdd_1_status",
+   "icon": "mdi:check-circle",
+   "name": "Status",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_hdd_1_temperature": {
+   "device_class": "temperature",
+   "entity_id": "sensor.unas_hdd_1_temperature",
+   "icon": null,
+   "name": "Temperature",
+   "precision": 0,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "unas_hdd_1_total_size": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_hdd_1_total_size",
+   "icon": null,
+   "name": "Total Size",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "TB"
+  },
+  "unas_memory_total": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_memory_total",
+   "icon": null,
+   "name": "Memory Total",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": "GiB",
+   "unit": "GiB"
+  },
+  "unas_memory_usage": {
+   "device_class": null,
+   "entity_id": "sensor.unas_memory_usage",
+   "icon": "mdi:memory",
+   "name": "Memory Usage",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_memory_used": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_memory_used",
+   "icon": null,
+   "name": "Memory Used",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": "GiB",
+   "unit": "GiB"
+  },
+  "unas_nvme_0_available_spare": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_available_spare",
+   "icon": "mdi:database",
+   "name": "Available Spare",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_nvme_0_firmware": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_firmware",
+   "icon": "mdi:information",
+   "name": "Firmware",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_media_errors": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_media_errors",
+   "icon": "mdi:alert-circle",
+   "name": "Media Errors",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_model": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_model",
+   "icon": "mdi:expansion-card",
+   "name": "Model",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_percentage_used": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_percentage_used",
+   "icon": "mdi:chart-line",
+   "name": "Percentage Used",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_nvme_0_power_on_hours": {
+   "device_class": "duration",
+   "entity_id": "sensor.unas_nvme_0_power_on_hours",
+   "icon": null,
+   "name": "Power-On Hours",
+   "precision": 2,
+   "state_class": "total_increasing",
+   "suggested_unit": null,
+   "unit": "h"
+  },
+  "unas_nvme_0_serial": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_serial_number",
+   "icon": "mdi:identifier",
+   "name": "Serial Number",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_status": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_status",
+   "icon": "mdi:check-circle",
+   "name": "Status",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_nvme_0_temperature": {
+   "device_class": "temperature",
+   "entity_id": "sensor.unas_nvme_0_temperature",
+   "icon": null,
+   "name": "Temperature",
+   "precision": 0,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "unas_nvme_0_total_size": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_nvme_0_total_size",
+   "icon": null,
+   "name": "Total Size",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "TB"
+  },
+  "unas_nvme_0_unsafe_shutdowns": {
+   "device_class": null,
+   "entity_id": "sensor.unas_nvme_0_unsafe_shutdowns",
+   "icon": "mdi:power",
+   "name": "Unsafe Shutdowns",
+   "precision": null,
+   "state_class": "total_increasing",
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_os_version": {
+   "device_class": null,
+   "entity_id": "sensor.unas_unifi_os_version",
+   "icon": "mdi:information",
+   "name": "UniFi OS Version",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_pool1_available": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_storage_pool_1_available",
+   "icon": null,
+   "name": "Storage Pool 1 Available",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": "TB",
+   "unit": "TB"
+  },
+  "unas_pool1_raid_level": {
+   "device_class": null,
+   "entity_id": "sensor.unas_storage_pool_1_raid_level",
+   "icon": "mdi:database",
+   "name": "Storage Pool 1 RAID Level",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_pool1_size": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_storage_pool_1_size",
+   "icon": null,
+   "name": "Storage Pool 1 Size",
+   "precision": 2,
+   "state_class": null,
+   "suggested_unit": "TB",
+   "unit": "TB"
+  },
+  "unas_pool1_status": {
+   "device_class": null,
+   "entity_id": "sensor.unas_storage_pool_1_status",
+   "icon": "mdi:check-circle",
+   "name": "Storage Pool 1 Status",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_pool1_usage": {
+   "device_class": null,
+   "entity_id": "sensor.unas_storage_pool_1_usage",
+   "icon": "mdi:harddisk",
+   "name": "Storage Pool 1 Usage",
+   "precision": null,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "%"
+  },
+  "unas_pool1_used": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_storage_pool_1_used",
+   "icon": null,
+   "name": "Storage Pool 1 Used",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": "TB",
+   "unit": "TB"
+  },
+  "unas_protect_version": {
+   "device_class": null,
+   "entity_id": "sensor.unas_unifi_protect_version",
+   "icon": "mdi:information",
+   "name": "UniFi Protect Version",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_encryption": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_encryption",
+   "icon": "mdi:lock",
+   "name": "Encryption",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_member_count": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_members",
+   "icon": "mdi:account-multiple",
+   "name": "Members",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_pool": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_storage_pool",
+   "icon": "mdi:database",
+   "name": "Storage Pool",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_quota": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_quota",
+   "icon": "mdi:folder-lock",
+   "name": "Quota",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_snapshot_enabled": {
+   "device_class": null,
+   "entity_id": "sensor.unas_share_plex_snapshots",
+   "icon": "mdi:camera",
+   "name": "Snapshots",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "unas_share_plex_usage": {
+   "device_class": "data_size",
+   "entity_id": "sensor.unas_share_plex_usage",
+   "icon": "mdi:folder",
+   "name": "Usage",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": "TB",
+   "unit": "TB"
+  },
+  "unas_uptime": {
+   "device_class": "timestamp",
+   "entity_id": "sensor.unas_uptime",
+   "icon": null,
+   "name": "Uptime",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  }
+ }
+}

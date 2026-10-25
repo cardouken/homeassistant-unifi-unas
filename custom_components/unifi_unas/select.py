@@ -2,19 +2,21 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components.select import SelectEntity
+from homeassistant.components.select import SelectEntity, SelectEntityDescription
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import UNASConfigEntry
 from .const import CONF_DEVICE_MODEL
 from .coordinator import UNASDataCoordinator
-from .devices import main_device
+from .entity import UNASEntity
 from .fan_state import FanState, async_publish_setting
 from .ssh_manager import SSHManager
 
 _LOGGER = logging.getLogger(__name__)
+
+PARALLEL_UPDATES = 1
 
 DEFAULT_SPEED = 128
 
@@ -34,25 +36,13 @@ async def async_setup_entry(
     coordinator = entry.runtime_data.data
     async_add_entities([
         UNASFanModeSelect(coordinator, entry.runtime_data.ssh),
-        UNASFanOptionSelect(
-            coordinator, "temp_metric", "Temperature Metric", "mdi:thermometer-lines", "temp_metric", TEMP_METRICS
-        ),
-        UNASFanOptionSelect(
-            coordinator, "response_speed", "Response Speed", "mdi:speedometer", "response_speed", RESPONSE_SPEEDS
-        ),
+        UNASFanOptionSelect(coordinator, "temp_metric", TEMP_METRICS),
+        UNASFanOptionSelect(coordinator, "response_speed", RESPONSE_SPEEDS),
     ])
 
 
-class UNASFanSelect(CoordinatorEntity, SelectEntity):
+class UNASFanSelect(UNASEntity, SelectEntity):
     coordinator: UNASDataCoordinator
-
-    def __init__(self, coordinator: UNASDataCoordinator, key: str, name: str, icon: str) -> None:
-        super().__init__(coordinator)
-        self._attr_has_entity_name = True
-        self._attr_name = name
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
-        self._attr_icon = icon
-        self._attr_device_info = main_device(coordinator.entry)
 
     @property
     def fan(self) -> FanState:
@@ -66,7 +56,7 @@ class UNASFanSelect(CoordinatorEntity, SelectEntity):
 
 class UNASFanModeSelect(UNASFanSelect):
     def __init__(self, coordinator: UNASDataCoordinator, ssh: SSHManager) -> None:
-        super().__init__(coordinator, "fan_mode", "Fan Mode", "mdi:fan-auto")
+        super().__init__(coordinator, "fan_mode", SelectEntityDescription(key="fan_mode", translation_key="fan_mode"))
         self._ssh = ssh
         base_type = "UNVR" if coordinator.entry.data[CONF_DEVICE_MODEL].startswith("UNVR") else "UNAS"
         self._modes = {
@@ -104,11 +94,11 @@ class UNASFanModeSelect(UNASFanSelect):
 
 
 class UNASFanOptionSelect(UNASFanSelect):
-    def __init__(
-            self, coordinator: UNASDataCoordinator, key: str, name: str, icon: str, setting: str,
-            labels: dict[str, str],
-    ) -> None:
-        super().__init__(coordinator, key, name, icon)
+    def __init__(self, coordinator: UNASDataCoordinator, setting: str, labels: dict[str, str]) -> None:
+        super().__init__(
+            coordinator, setting,
+            SelectEntityDescription(key=setting, translation_key=setting, entity_category=EntityCategory.CONFIG),
+        )
         self._setting = setting
         self._labels = labels
         self._attr_options = list(labels.values())

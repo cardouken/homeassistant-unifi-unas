@@ -151,6 +151,230 @@
     },
     "fan_order": {
       "message": "Max fan speed ({max}%) must be greater than min fan speed ({min}%)."
+    },
+    "backup_failed": {
+      "message": "Could not start the backup: {error}"
+    },
+    "schedule_failed": {
+      "message": "Could not change the backup schedule: {error}"
+    },
+    "deploy_running": {
+      "message": "The scripts are already being deployed, try again once that finishes."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "cpu_temp": {
+        "name": "CPU Temperature"
+      },
+      "cpu_usage": {
+        "name": "CPU Usage"
+      },
+      "fan_speed": {
+        "name": "Fan Speed (PWM)"
+      },
+      "fan_speed_percent": {
+        "name": "Fan Speed (Percent)"
+      },
+      "memory_usage": {
+        "name": "Memory Usage"
+      },
+      "memory_used": {
+        "name": "Memory Used"
+      },
+      "memory_total": {
+        "name": "Memory Total"
+      },
+      "disk_read": {
+        "name": "Disk Read"
+      },
+      "disk_write": {
+        "name": "Disk Write"
+      },
+      "smb_connections": {
+        "name": "SMB Connections"
+      },
+      "nfs_mounts": {
+        "name": "NFS Mounts"
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "os_version": {
+        "name": "UniFi OS Version"
+      },
+      "drive_version": {
+        "name": "UniFi Drive Version"
+      },
+      "protect_version": {
+        "name": "UniFi Protect Version"
+      },
+      "fan_curve": {
+        "name": "Fan Curve"
+      },
+      "pool_usage": {
+        "name": "Storage Pool {pool} Usage"
+      },
+      "pool_size": {
+        "name": "Storage Pool {pool} Size"
+      },
+      "pool_used": {
+        "name": "Storage Pool {pool} Used"
+      },
+      "pool_available": {
+        "name": "Storage Pool {pool} Available"
+      },
+      "pool_status": {
+        "name": "Storage Pool {pool} Status"
+      },
+      "pool_raid_level": {
+        "name": "Storage Pool {pool} RAID Level"
+      },
+      "share_usage": {
+        "name": "Usage"
+      },
+      "share_quota": {
+        "name": "Quota"
+      },
+      "share_pool": {
+        "name": "Storage Pool"
+      },
+      "share_member_count": {
+        "name": "Members"
+      },
+      "share_snapshot_enabled": {
+        "name": "Snapshots"
+      },
+      "share_encryption": {
+        "name": "Encryption"
+      },
+      "drive_temperature": {
+        "name": "Temperature"
+      },
+      "drive_model": {
+        "name": "Model"
+      },
+      "drive_serial": {
+        "name": "Serial Number"
+      },
+      "drive_rpm": {
+        "name": "RPM"
+      },
+      "drive_firmware": {
+        "name": "Firmware"
+      },
+      "drive_status": {
+        "name": "Status"
+      },
+      "drive_total_size": {
+        "name": "Total Size"
+      },
+      "drive_power_on_hours": {
+        "name": "Power-On Hours"
+      },
+      "drive_bad_sectors": {
+        "name": "Bad Sectors"
+      },
+      "nvme_model": {
+        "name": "Model"
+      },
+      "nvme_percentage_used": {
+        "name": "Percentage Used"
+      },
+      "nvme_available_spare": {
+        "name": "Available Spare"
+      },
+      "nvme_media_errors": {
+        "name": "Media Errors"
+      },
+      "nvme_unsafe_shutdowns": {
+        "name": "Unsafe Shutdowns"
+      },
+      "backup_status": {
+        "name": "Status"
+      },
+      "backup_last_run": {
+        "name": "Last run"
+      },
+      "backup_next_run": {
+        "name": "Next run"
+      },
+      "backup_duration": {
+        "name": "Last run duration"
+      },
+      "backup_destination": {
+        "name": "Destination"
+      },
+      "backup_source": {
+        "name": "Source"
+      },
+      "backup_schedule": {
+        "name": "Schedule"
+      },
+      "backup_name": {
+        "name": "Task name"
+      }
+    },
+    "binary_sensor": {
+      "scripts_installed": {
+        "name": "Scripts Installed"
+      },
+      "monitor_running": {
+        "name": "Monitor Service"
+      },
+      "fan_control_running": {
+        "name": "Fan Control Service"
+      }
+    },
+    "button": {
+      "reinstall_scripts": {
+        "name": "Reinstall Scripts"
+      },
+      "reboot": {
+        "name": "Reboot"
+      },
+      "shutdown": {
+        "name": "Shutdown"
+      },
+      "run_backup": {
+        "name": "Run backup"
+      }
+    },
+    "switch": {
+      "backup_schedule_enabled": {
+        "name": "Schedule enabled"
+      }
+    },
+    "select": {
+      "fan_mode": {
+        "name": "Fan Mode"
+      },
+      "temp_metric": {
+        "name": "Temperature Metric"
+      },
+      "response_speed": {
+        "name": "Response Speed"
+      }
+    },
+    "number": {
+      "fan_speed": {
+        "name": "Fan Speed"
+      },
+      "curve_min_temp": {
+        "name": "Min Temperature"
+      },
+      "curve_max_temp": {
+        "name": "Max Temperature"
+      },
+      "curve_min_fan": {
+        "name": "Min Fan Speed"
+      },
+      "curve_max_fan": {
+        "name": "Max Fan Speed"
+      },
+      "curve_target_temp": {
+        "name": "Target Temperature"
+      }
     }
   }
 }

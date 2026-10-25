@@ -1,25 +1,36 @@
 from __future__ import annotations
 
-from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.components.number import NumberEntity, NumberEntityDescription, NumberMode
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import UNASConfigEntry
 from .const import DOMAIN
 from .coordinator import UNASDataCoordinator
-from .devices import main_device
+from .entity import UNASEntity
 from .fan_state import FanState, async_publish_setting, percent_to_pwm, pwm_to_percent
 
-# fan curve parameter definitions: (key, name, min, max, unit, icon)
-FAN_CURVE_PARAMS = [
-    ("min_temp", "Min Temperature", 20, 50, "°C", "mdi:thermometer-low"),
-    ("max_temp", "Max Temperature", 30, 60, "°C", "mdi:thermometer-high"),
-    ("min_fan", "Min Fan Speed", 0, 100, "%", "mdi:fan-speed-1"),
-    ("max_fan", "Max Fan Speed", 1, 100, "%", "mdi:fan-speed-3"),
-    ("target_temp", "Target Temperature", 20, 50, "°C", "mdi:thermometer-check"),
-]
+PARALLEL_UPDATES = 1
+
+FAN_CURVE_PARAMS = tuple(
+    NumberEntityDescription(
+        key=key, translation_key=f"curve_{key}", native_min_value=low, native_max_value=high, native_step=1,
+        native_unit_of_measurement=unit, mode=NumberMode.BOX, entity_category=EntityCategory.CONFIG,
+    )
+    for key, low, high, unit in (
+        ("min_temp", 20, 50, "°C"),
+        ("max_temp", 30, 60, "°C"),
+        ("min_fan", 0, 100, "%"),
+        ("max_fan", 1, 100, "%"),
+        ("target_temp", 20, 50, "°C"),
+    )
+)
+FAN_SPEED = NumberEntityDescription(
+    key="fan_speed", translation_key="fan_speed", native_min_value=0, native_max_value=100, native_step=1,
+    native_unit_of_measurement="%", mode=NumberMode.SLIDER,
+)
 FAN_PARAMS = ("min_fan", "max_fan")
 # which fan modes each curve parameter applies to
 CURVE_MODES = {
@@ -40,20 +51,12 @@ async def async_setup_entry(
     coordinator = entry.runtime_data.data
     async_add_entities([
         UNASFanSpeedNumber(coordinator),
-        *(UNASFanCurveNumber(coordinator, *param) for param in FAN_CURVE_PARAMS),
+        *(UNASFanCurveNumber(coordinator, description) for description in FAN_CURVE_PARAMS),
     ])
 
 
-class UNASFanNumber(CoordinatorEntity, NumberEntity):
+class UNASFanNumber(UNASEntity, NumberEntity):
     coordinator: UNASDataCoordinator
-
-    def __init__(self, coordinator: UNASDataCoordinator, key: str, name: str) -> None:
-        super().__init__(coordinator)
-        self._attr_has_entity_name = True
-        self._attr_name = name
-        self._attr_unique_id = f"{coordinator.entry.entry_id}_{key}"
-        self._attr_native_step = 1
-        self._attr_device_info = main_device(coordinator.entry)
 
     @property
     def fan(self) -> FanState:
@@ -67,11 +70,7 @@ class UNASFanNumber(CoordinatorEntity, NumberEntity):
 
 class UNASFanSpeedNumber(UNASFanNumber):
     def __init__(self, coordinator: UNASDataCoordinator) -> None:
-        super().__init__(coordinator, "fan_speed_control", "Fan Speed")
-        self._attr_native_min_value = 0
-        self._attr_native_max_value = 100
-        self._attr_native_unit_of_measurement = "%"
-        self._attr_mode = NumberMode.SLIDER
+        super().__init__(coordinator, "fan_speed_control", FAN_SPEED)
 
     @property
     def available(self) -> bool:
@@ -95,17 +94,9 @@ class UNASFanSpeedNumber(UNASFanNumber):
 
 
 class UNASFanCurveNumber(UNASFanNumber):
-    def __init__(
-            self, coordinator: UNASDataCoordinator, key: str, name: str, min_val: int, max_val: int, unit: str,
-            icon: str,
-    ) -> None:
-        super().__init__(coordinator, f"fan_curve_{key}", name)
-        self._key = key
-        self._attr_native_min_value = min_val
-        self._attr_native_max_value = max_val
-        self._attr_native_unit_of_measurement = unit
-        self._attr_icon = icon
-        self._attr_mode = NumberMode.BOX
+    def __init__(self, coordinator: UNASDataCoordinator, description: NumberEntityDescription) -> None:
+        super().__init__(coordinator, f"fan_curve_{description.key}", description)
+        self._key = description.key
 
     def _value(self, fan: FanState, key: str) -> int | None:
         value = fan.curve.get(key)
@@ -116,7 +107,7 @@ class UNASFanCurveNumber(UNASFanNumber):
     @property
     def native_value(self) -> int | None:
         value = self._value(self.fan, self._key)
-        if value is None or not self._attr_native_min_value <= value <= self._attr_native_max_value:
+        if value is None or not self.native_min_value <= value <= self.native_max_value:
             return None
         return value
 

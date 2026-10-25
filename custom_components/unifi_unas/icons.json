@@ -1,0 +1,176 @@
+{
+  "entity": {
+    "sensor": {
+      "cpu_usage": {
+        "default": "mdi:chip"
+      },
+      "fan_speed": {
+        "default": "mdi:fan"
+      },
+      "fan_speed_percent": {
+        "default": "mdi:fan"
+      },
+      "memory_usage": {
+        "default": "mdi:memory"
+      },
+      "disk_read": {
+        "default": "mdi:download"
+      },
+      "disk_write": {
+        "default": "mdi:upload"
+      },
+      "smb_connections": {
+        "default": "mdi:server-network"
+      },
+      "nfs_mounts": {
+        "default": "mdi:folder-network"
+      },
+      "os_version": {
+        "default": "mdi:information"
+      },
+      "drive_version": {
+        "default": "mdi:information"
+      },
+      "protect_version": {
+        "default": "mdi:information"
+      },
+      "fan_curve": {
+        "default": "mdi:chart-line"
+      },
+      "pool_usage": {
+        "default": "mdi:harddisk"
+      },
+      "pool_status": {
+        "default": "mdi:check-circle"
+      },
+      "pool_raid_level": {
+        "default": "mdi:database"
+      },
+      "share_usage": {
+        "default": "mdi:folder"
+      },
+      "share_quota": {
+        "default": "mdi:folder-lock"
+      },
+      "share_pool": {
+        "default": "mdi:database"
+      },
+      "share_member_count": {
+        "default": "mdi:account-multiple"
+      },
+      "share_snapshot_enabled": {
+        "default": "mdi:camera"
+      },
+      "share_encryption": {
+        "default": "mdi:lock"
+      },
+      "drive_model": {
+        "default": "mdi:harddisk"
+      },
+      "drive_serial": {
+        "default": "mdi:identifier"
+      },
+      "drive_rpm": {
+        "default": "mdi:speedometer"
+      },
+      "drive_firmware": {
+        "default": "mdi:information"
+      },
+      "drive_status": {
+        "default": "mdi:check-circle"
+      },
+      "drive_bad_sectors": {
+        "default": "mdi:alert-circle"
+      },
+      "nvme_model": {
+        "default": "mdi:expansion-card"
+      },
+      "nvme_percentage_used": {
+        "default": "mdi:chart-line"
+      },
+      "nvme_available_spare": {
+        "default": "mdi:database"
+      },
+      "nvme_media_errors": {
+        "default": "mdi:alert-circle"
+      },
+      "nvme_unsafe_shutdowns": {
+        "default": "mdi:power"
+      },
+      "backup_status": {
+        "default": "mdi:cloud-sync"
+      },
+      "backup_last_run": {
+        "default": "mdi:clock-check"
+      },
+      "backup_next_run": {
+        "default": "mdi:clock-outline"
+      },
+      "backup_duration": {
+        "default": "mdi:timer-outline"
+      },
+      "backup_destination": {
+        "default": "mdi:cloud-upload"
+      },
+      "backup_source": {
+        "default": "mdi:folder-multiple"
+      },
+      "backup_schedule": {
+        "default": "mdi:calendar-clock"
+      },
+      "backup_name": {
+        "default": "mdi:tag"
+      }
+    },
+    "button": {
+      "reinstall_scripts": {
+        "default": "mdi:cog-refresh"
+      },
+      "reboot": {
+        "default": "mdi:restart"
+      },
+      "shutdown": {
+        "default": "mdi:power"
+      },
+      "run_backup": {
+        "default": "mdi:cloud-upload"
+      }
+    },
+    "switch": {
+      "backup_schedule_enabled": {
+        "default": "mdi:calendar-clock"
+      }
+    },
+    "select": {
+      "fan_mode": {
+        "default": "mdi:fan-auto"
+      },
+      "temp_metric": {
+        "default": "mdi:thermometer-lines"
+      },
+      "response_speed": {
+        "default": "mdi:speedometer"
+      }
+    },
+    "number": {
+      "fan_speed": {
+        "default": "mdi:fan"
+      },
+      "curve_min_temp": {
+        "default": "mdi:thermometer-low"
+      },
+      "curve_max_temp": {
+        "default": "mdi:thermometer-high"
+      },
+      "curve_min_fan": {
+        "default": "mdi:fan-speed-1"
+      },
+      "curve_max_fan": {
+        "default": "mdi:fan-speed-3"
+      },
+      "curve_target_temp": {
+        "default": "mdi:thermometer-check"
+      }
+    }
+  }
+}

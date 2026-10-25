@@ -62,7 +62,7 @@ class Deployer:
     @callback
     def async_reinstall(self) -> None:
         if self.running:
-            raise HomeAssistantError("The scripts are already being deployed")
+            raise HomeAssistantError(translation_domain=DOMAIN, translation_key="deploy_running")
         self._start(None)
 
     @callback
