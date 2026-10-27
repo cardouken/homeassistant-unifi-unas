@@ -73,6 +73,7 @@ class SSHManager:
             mqtt_tls_insecure: bool = False,
             verify_host_key: bool = False,
             pinned_host_key: Optional[str] = None,
+            connect_timeout: float = SSH_CONNECT_TIMEOUT,
     ) -> None:
         self.host = host
         self.username = username
@@ -87,6 +88,7 @@ class SSHManager:
         self.mqtt_tls_insecure = mqtt_tls_insecure
         self.verify_host_key = verify_host_key
         self.pinned_host_key = pinned_host_key
+        self.connect_timeout = connect_timeout
         # Populated on connect with the server's host key in known_hosts form
         # ("host keytype base64"), for trust-on-first-use pinning by the caller.
         self.server_host_key: Optional[str] = None
@@ -128,7 +130,7 @@ class SSHManager:
                     keepalive_interval=KEEPALIVE_INTERVAL,
                     keepalive_count_max=3,
                 ),
-                timeout=SSH_CONNECT_TIMEOUT,
+                timeout=self.connect_timeout,
             )
             if self._closed:
                 # disconnected (unloaded) while this was connecting, nothing would close it
@@ -221,6 +223,9 @@ class SSHManager:
         files = await self.bundle(device_model, mqtt_root)
         status = await self.status(sorted(files))
         return status, outdated_files(files, status.get("files") or {})
+
+    async def identity(self) -> dict:
+        return await self._helper("identity")
 
     async def run_backup(self, task_id: str) -> None:
         await self._helper("run-backup", task_id)

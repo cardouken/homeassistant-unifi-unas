@@ -10,6 +10,7 @@ import sys
 
 SERVICES = ("unas_monitor", "fan_control")
 USERS_FILE = "/data/unifi-core/config/cache/users.json"
+UIDB_FILE = "/usr/share/unifi-core/app/data/uidb.json"
 TASKS_PATH = "/api/v1/remote-backup/tasks"
 TASK_ID = re.compile(r"[\w-]{1,64}")
 
@@ -93,6 +94,44 @@ def backup_tasks():
     return [task for task in tasks if isinstance(task, dict) and task.get("id")]
 
 
+def identity():
+    # what the console is, for the setup flow: model detection and the entry's unique_id
+    conn = http.client.HTTPConnection("127.0.0.1", 11081, timeout=5)
+    try:
+        conn.request("GET", "/api/system")
+        resp = conn.getresponse()
+        data = json.loads(resp.read()) if resp.status == 200 else None
+    except (OSError, ValueError, http.client.HTTPException) as err:
+        raise ApiError(f"GET /api/system: {err}")
+    finally:
+        conn.close()
+    hardware = (data or {}).get("hardware") if isinstance(data, dict) else None
+    if not isinstance(hardware, dict) or not hardware:
+        raise ApiError("GET /api/system: no hardware info")
+    sysid = hardware.get("sysid")
+    sysid = "%04x" % sysid if isinstance(sysid, int) else None
+    result = {
+        "sysid": sysid,
+        "serial": hardware.get("serialno"),
+        "shortname": hardware.get("shortname"),
+        "name": hardware.get("name"),
+        "product": None,
+        "sku": None,
+    }
+    try:
+        with open(UIDB_FILE) as f:
+            devices = json.load(f).get("devices") or []
+    except (OSError, ValueError, AttributeError):
+        devices = []
+    for device in devices:
+        if isinstance(device, dict) and sysid and device.get("sysid") == sysid:
+            product = device.get("product") or {}
+            result["product"] = product.get("abbrev") or product.get("name")
+            result["sku"] = device.get("sku")
+            break
+    return result
+
+
 def status(paths):
     result = {"services": service_states(), "files": file_hashes(paths)}
     try:
@@ -124,6 +163,8 @@ def main(argv):
     try:
         if command == "status":
             result = status(args)
+        elif command == "identity":
+            result = identity()
         elif command == "run-backup" and len(args) == 1 and TASK_ID.fullmatch(args[0]):
             result = run_backup(args[0])
         elif command == "set-schedule" and len(args) == 2 and TASK_ID.fullmatch(args[0]):
@@ -131,7 +172,7 @@ def main(argv):
                 raise ApiError(f"invalid schedule state {args[1]!r}")
             result = set_schedule(args[0], args[1] == "on")
         else:
-            result = {"error": "usage: status [paths] | run-backup <id> | set-schedule <id> on|off"}
+            result = {"error": "usage: status [paths] | identity | run-backup <id> | set-schedule <id> on|off"}
     except ApiError as err:
         result = {"error": str(err)}
     print(json.dumps(result))

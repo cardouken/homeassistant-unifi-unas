@@ -43,14 +43,14 @@ async def test_interval_change_applies_without_a_reload(hass, mqtt_mock, ssh):
 
 
 async def test_new_entries_keep_the_interval_in_options(hass, mqtt_mock, ssh):
+    identity = {"sysid": "ea51", "serial": "0cea14c0c079"}
     with (
-        patch("custom_components.unifi_unas.config_flow.UNASProConfigFlow._test_ssh", return_value=None),
-        patch("custom_components.unifi_unas.config_flow.UNASProConfigFlow._test_mqtt", return_value=None),
+        patch("custom_components.unifi_unas.config_flow.UNASProConfigFlow._probe_ssh", return_value=(None, identity)),
+        patch("custom_components.unifi_unas.config_flow.probe_mqtt", return_value=None),
     ):
         result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {**entry_data(), "scan_interval": 15.0, "mqtt_tls": False}
-        )
+        data = {key: value for key, value in entry_data().items() if key != "device_model"}
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {**data, "scan_interval": 15.0})
         await hass.async_block_till_done()
     entry = result["result"]
     assert entry.options == {"scan_interval": 15}

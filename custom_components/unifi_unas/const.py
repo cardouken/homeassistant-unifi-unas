@@ -54,6 +54,21 @@ DEVICE_MODELS = {
     "UNVR_PRO": "UNVR Pro",
 }
 
+# hardware sysid from /api/system, as in UniFi's own uidb.json; the Gen 2 UNVRs are not known to work yet
+SYSID_MODELS = {
+    "ea51": "UNAS_PRO",
+    "ea63": "UNAS_PRO_8",
+    "ea67": "UNAS_PRO_4",
+    "ea65": "UNAS_4",
+    "ea66": "UNAS_4",
+    "ea62": "UNAS_2",
+    "ea72": "UNAS_2",
+    "ea16": "UNVR",
+    "ea1a": "UNVR",
+    "ea20": "UNVR_PRO",
+    "ea61": "UNVR_INSTANT",
+}
+
 
 def get_device_info(entry_data: dict) -> tuple[str, str]:
     device_model = entry_data[CONF_DEVICE_MODEL]

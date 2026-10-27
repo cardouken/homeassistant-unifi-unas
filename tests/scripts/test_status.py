@@ -92,3 +92,22 @@ def test_bad_arguments_never_reach_the_api(api, argv):
     requests = api(body=json_body({"err": None, "data": "OK"}))
     assert status.main(argv) == 1
     assert requests == []
+
+
+def test_identity_names_the_console(tmp_path, monkeypatch):
+    system = {"hardware": {"sysid": 59985, "serialno": "0cea14c0c079", "shortname": "UNASPRO",
+                           "name": "UniFi Network Attached Storage Pro"}}
+    monkeypatch.setattr(status.http.client, "HTTPConnection", fake_connection(body=json_body(system)))
+    table = tmp_path / "uidb.json"
+    table.write_text(json.dumps({"devices": [{"sysid": "ea51", "sku": "UNAS-Pro", "product": {"abbrev": "UNAS Pro"}}]}))
+    monkeypatch.setattr(status, "UIDB_FILE", str(table))
+    assert status.identity() == {
+        "sysid": "ea51", "serial": "0cea14c0c079", "shortname": "UNASPRO",
+        "name": "UniFi Network Attached Storage Pro", "product": "UNAS Pro", "sku": "UNAS-Pro",
+    }
+
+
+def test_identity_fails_off_a_unifi_console(monkeypatch, capsys):
+    monkeypatch.setattr(status.http.client, "HTTPConnection", fake_connection(error=OSError("connection refused")))
+    assert status.main(["identity"]) == 1
+    assert "api/system" in json.loads(capsys.readouterr().out)["error"]

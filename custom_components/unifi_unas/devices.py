@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
-from .const import CONF_HOST, DOMAIN, format_remote_type, get_device_info
+from .const import CONF_DEVICE_MODEL, CONF_HOST, DOMAIN, SYSID_MODELS, format_remote_type, get_device_info
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -154,6 +154,21 @@ class DeviceSync:
         self.entry.async_on_unload(self.coordinator.async_add_listener(self._async_sync))
         self._async_sync()
 
+    def _check_identity(self, nas: dict[str, Any]) -> None:
+        if serial := nas.get("serial"):
+            serial = str(serial).lower()
+            others = [e for e in self.hass.config_entries.async_entries(DOMAIN) if e is not self.entry]
+            if self.entry.unique_id != serial and all(e.unique_id != serial for e in others):
+                # entries from before 0.10 were keyed by IP
+                _LOGGER.info("Identifying %s by its serial from now on", self.entry.title)
+                self.hass.config_entries.async_update_entry(self.entry, unique_id=serial)
+        detected = SYSID_MODELS.get(nas.get("sysid"))
+        if detected and detected != self.entry.data.get(CONF_DEVICE_MODEL):
+            _LOGGER.warning(
+                "%s is set up as %s but reports itself as %s", self.entry.title,
+                self.entry.data.get(CONF_DEVICE_MODEL), detected,
+            )
+
     @callback
     def _async_sync(self) -> None:
         data = self.coordinator.data or {}
@@ -167,6 +182,7 @@ class DeviceSync:
                     device.id, new_connections=main_connections(nas), **main_device_fields(self.entry, nas)
                 )
             self._applied["main"] = nas
+            self._check_identity(nas)
 
         for category, (prefix, _) in DRIVE_KINDS.items():
             for slot in self.coordinator.mqtt_client.items(category)[0]:

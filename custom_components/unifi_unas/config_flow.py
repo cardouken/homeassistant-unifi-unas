@@ -47,11 +47,21 @@ from .const import (
     CONF_DEVICE_NAME,
     DEVICE_MODELS,
     HA_SSH_KEY_PATHS,
+    SYSID_MODELS,
 )
+from .ssh_manager import NASCommandError, SSHManager
 
 _LOGGER = logging.getLogger(__name__)
 
 MQTT_PROBE_TIMEOUT = 5
+SSH_PROBE_TIMEOUT = 10
+
+MODEL_SELECTOR = SelectSelector(
+    SelectSelectorConfig(
+        options=[{"value": k, "label": v} for k, v in DEVICE_MODELS.items()],
+        mode=SelectSelectorMode.DROPDOWN,
+    )
+)
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -62,12 +72,6 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Required(CONF_MQTT_USER): str,
         vol.Required(CONF_MQTT_PASSWORD): str,
         vol.Optional(CONF_MQTT_TLS, default=False): BooleanSelector(),
-        vol.Required(CONF_DEVICE_MODEL, default=DEFAULT_DEVICE_MODEL): SelectSelector(
-            SelectSelectorConfig(
-                options=[{"value": k, "label": v} for k, v in DEVICE_MODELS.items()],
-                mode=SelectSelectorMode.DROPDOWN,
-            )
-        ),
         vol.Optional(CONF_DEVICE_NAME, default="UNAS"): str,
         vol.Optional(CONF_VERIFY_HOST_KEY, default=False): BooleanSelector(),
         vol.Optional(CONF_SCAN_INTERVAL, default=DEFAULT_SCAN_INTERVAL): NumberSelector(
@@ -91,14 +95,10 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
         entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
-        old_model = entry.data[CONF_DEVICE_MODEL]
 
         if user_input is not None:
-            new_model = user_input[CONF_DEVICE_MODEL]
-
-            if new_model != old_model:
-                errors["base"] = "model_changed"
-            elif error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
+            user_input = {**user_input, CONF_DEVICE_MODEL: entry.data[CONF_DEVICE_MODEL]}
+            if error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
                                                    user_input.get(CONF_PASSWORD)):
                 errors["base"] = error_key
             elif user_input.get(CONF_MQTT_TLS):
@@ -131,12 +131,6 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_MQTT_USER, default=entry.data[CONF_MQTT_USER]): str,
                 vol.Required(CONF_MQTT_PASSWORD, default=entry.data[CONF_MQTT_PASSWORD]): str,
                 vol.Optional(CONF_MQTT_TLS, default=entry.data.get(CONF_MQTT_TLS, False)): BooleanSelector(),
-                vol.Required(CONF_DEVICE_MODEL, default=old_model): SelectSelector(
-                    SelectSelectorConfig(
-                        options=[{"value": k, "label": v} for k, v in DEVICE_MODELS.items()],
-                        mode=SelectSelectorMode.DROPDOWN,
-                    )
-                ),
                 vol.Optional(
                     CONF_DEVICE_NAME,
                     default=entry.data.get(CONF_DEVICE_NAME) or "UNAS",
@@ -209,26 +203,54 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self._async_abort_entries_match({CONF_HOST: user_input[CONF_HOST]})
-            if error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
-                                                 user_input.get(CONF_PASSWORD)):
-                errors["base"] = error_key
-            elif user_input.get(CONF_MQTT_TLS):
-                self._pending_input = user_input
-                return await self.async_step_mqtt_tls()
-            elif error_key := await self._test_mqtt(user_input[CONF_MQTT_HOST], user_input[CONF_MQTT_USER],
-                                                    user_input[CONF_MQTT_PASSWORD]):
+            error_key, identity = await self._probe_ssh(
+                user_input[CONF_HOST], user_input[CONF_USERNAME], user_input.get(CONF_PASSWORD)
+            )
+            if error_key:
                 errors["base"] = error_key
             else:
-                await self.async_set_unique_id(user_input[CONF_HOST])
-                self._abort_if_unique_id_configured()
-
-                device_name = (
-                    user_input.get(CONF_DEVICE_NAME)
-                    or DEVICE_MODELS[user_input[CONF_DEVICE_MODEL]]
-                )
-                return self._create_entry(f"{device_name} ({user_input[CONF_HOST]})", user_input)
+                serial = (identity or {}).get("serial")
+                await self.async_set_unique_id(serial.lower() if serial else user_input[CONF_HOST])
+                # the same NAS on a new address just gets its host updated
+                self._abort_if_unique_id_configured(updates={CONF_HOST: user_input[CONF_HOST]})
+                self._pending_input = dict(user_input)
+                self._identity = identity
+                model = SYSID_MODELS.get((identity or {}).get("sysid"))
+                if model is None:
+                    return await self.async_step_unrecognized_device()
+                self._pending_input[CONF_DEVICE_MODEL] = model
+                return await self._async_step_mqtt()
 
         return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
+
+    async def async_step_unrecognized_device(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        # installing onto some other UniFi console would leave two publishers on one topic, see #25
+        if user_input is not None:
+            self._pending_input[CONF_DEVICE_MODEL] = user_input[CONF_DEVICE_MODEL]
+            return await self._async_step_mqtt()
+        identity = self._identity or {}
+        return self.async_show_form(
+            step_id="unrecognized_device",
+            data_schema=vol.Schema({vol.Required(CONF_DEVICE_MODEL, default=DEFAULT_DEVICE_MODEL): MODEL_SELECTOR}),
+            description_placeholders={
+                "host": self._pending_input[CONF_HOST],
+                "device": identity.get("product") or identity.get("name") or "an unknown device",
+            },
+        )
+
+    async def _async_step_mqtt(self) -> FlowResult:
+        if self._pending_input.get(CONF_MQTT_TLS):
+            return await self.async_step_mqtt_tls()
+        user_input = self._pending_input
+        if error_key := await self._test_mqtt(
+            user_input[CONF_MQTT_HOST], user_input[CONF_MQTT_USER], user_input[CONF_MQTT_PASSWORD]
+        ):
+            return self.async_show_form(
+                step_id="user",
+                data_schema=self.add_suggested_values_to_schema(STEP_USER_DATA_SCHEMA, user_input),
+                errors={"base": error_key},
+            )
+        return self._create_entry(user_input)
 
     async def async_step_mqtt_tls(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
@@ -244,14 +266,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ):
                 errors["base"] = error_key
             else:
-                await self.async_set_unique_id(merged[CONF_HOST])
-                self._abort_if_unique_id_configured()
-
-                device_name = (
-                    merged.get(CONF_DEVICE_NAME)
-                    or DEVICE_MODELS[merged[CONF_DEVICE_MODEL]]
-                )
-                return self._create_entry(f"{device_name} ({merged[CONF_HOST]})", merged)
+                return self._create_entry(merged)
 
         schema = vol.Schema({
             vol.Optional(CONF_MQTT_PORT, default=DEFAULT_MQTT_TLS_PORT): NumberSelector(
@@ -286,10 +301,36 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"host": entry.data[CONF_HOST]},
         )
 
-    def _create_entry(self, title: str, user_input: dict[str, Any]) -> FlowResult:
+    def _create_entry(self, user_input: dict[str, Any]) -> FlowResult:
         data = {key: value for key, value in user_input.items() if key != CONF_SCAN_INTERVAL}
         interval = int(user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
-        return self.async_create_entry(title=title, data=data, options={CONF_SCAN_INTERVAL: interval})
+        device_name = user_input.get(CONF_DEVICE_NAME) or DEVICE_MODELS[user_input[CONF_DEVICE_MODEL]]
+        return self.async_create_entry(
+            title=f"{device_name} ({user_input[CONF_HOST]})", data=data, options={CONF_SCAN_INTERVAL: interval}
+        )
+
+    async def _probe_ssh(
+            self, host: str, username: str, password: str | None
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        # one login: credentials, and what the console is
+        manager = SSHManager(host, username, password or None, connect_timeout=SSH_PROBE_TIMEOUT)
+        try:
+            return None, await manager.identity()
+        except asyncssh.PermissionDenied:
+            return "invalid_auth", None
+        except TimeoutError:
+            return "timeout_connect", None
+        except NASCommandError as err:
+            # reachable, but not a console that answers /api/system
+            _LOGGER.debug("Could not identify %s: %s", host, err)
+            return None, None
+        except (asyncssh.Error, OSError):
+            return "cannot_connect", None
+        except Exception:
+            _LOGGER.exception("Unexpected error connecting to %s", host)
+            return "unknown", None
+        finally:
+            await manager.disconnect()
 
     async def _test_ssh(self, host: str, username: str, password: str | None) -> str | None:
         try:
