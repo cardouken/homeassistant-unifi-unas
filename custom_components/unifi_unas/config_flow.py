@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
+import threading
+import time
 from collections.abc import Mapping
 from typing import Any
 
@@ -47,6 +50,8 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+MQTT_PROBE_TIMEOUT = 5
 
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
@@ -203,6 +208,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_abort(reason="mqtt_required")
 
         if user_input is not None:
+            self._async_abort_entries_match({CONF_HOST: user_input[CONF_HOST]})
             if error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
                                                  user_input.get(CONF_PASSWORD)):
                 errors["base"] = error_key
@@ -326,58 +332,58 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         port: int = DEFAULT_MQTT_PORT, use_tls: bool = False,
         tls_insecure: bool = False,
     ) -> str | None:
-        try:
-            import paho.mqtt.client as mqtt_client
+        return await self.hass.async_add_executor_job(
+            probe_mqtt, host, int(port), username, password, use_tls, tls_insecure
+        )
 
-            result = {"rc": None}
 
-            try:
-                client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
-                def on_connect(_client, _userdata, _flags, rc, _properties):
-                    result["rc"] = rc
-                    _client.disconnect()
-            except (AttributeError, TypeError):
-                client = mqtt_client.Client()
-                def on_connect(_client, _userdata, _flags, rc):
-                    result["rc"] = rc
-                    _client.disconnect()
+def probe_mqtt(
+        host: str, port: int, username: str, password: str, use_tls: bool, tls_insecure: bool
+) -> str | None:
+    # blocking socket and TLS setup, runs in the executor
+    import paho.mqtt.client as mqtt_client
 
-            import ssl
-            client.username_pw_set(username, password)
-            if use_tls:
-                if tls_insecure:
-                    client.tls_set(cert_reqs=ssl.CERT_NONE)
-                    client.tls_insecure_set(True)
-                else:
-                    client.tls_set()
-            client.on_connect = on_connect
+    connected = threading.Event()
+    result: dict[str, Any] = {}
 
-            try:
-                client.connect(host, int(port), 60)
-            except Exception as e:
-                if isinstance(e, ssl.SSLCertVerificationError):
-                    _LOGGER.debug("MQTT TLS certificate verification failed: %s", e)
-                    return "mqtt_tls_verify_failed"
-                _LOGGER.debug("MQTT connection failed: %s", e)
-                return "mqtt_cannot_connect"
+    def on_connect(_client, _userdata, _flags, reason_code, _properties):
+        result["reason_code"] = reason_code
+        connected.set()
 
-            client.loop_start()
-            await asyncio.sleep(3)
-            client.loop_stop()
-
-            if result["rc"] == 0:
-                return None
-            elif result["rc"] == 5:
-                return "mqtt_invalid_auth"
-            elif result["rc"] is None:
-                return "mqtt_timeout"
+    client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION2)
+    client.username_pw_set(username, password)
+    client.connect_timeout = MQTT_PROBE_TIMEOUT
+    client.on_connect = on_connect
+    try:
+        if use_tls:
+            if tls_insecure:
+                client.tls_set(cert_reqs=ssl.CERT_NONE)
+                client.tls_insecure_set(True)
             else:
-                _LOGGER.debug("MQTT connection result code: %s", result["rc"])
-                return "mqtt_cannot_connect"
+                client.tls_set()
+        client.connect(host, port, keepalive=30)
+        deadline = time.monotonic() + MQTT_PROBE_TIMEOUT
+        while not connected.is_set() and time.monotonic() < deadline:
+            client.loop(timeout=0.2)
+    except ssl.SSLCertVerificationError as err:
+        _LOGGER.debug("MQTT TLS certificate verification failed: %s", err)
+        return "mqtt_tls_verify_failed"
+    except (OSError, ValueError) as err:
+        _LOGGER.debug("MQTT connection failed: %s", err)
+        return "mqtt_cannot_connect"
+    finally:
+        client.disconnect()
 
-        except Exception as e:
-            _LOGGER.debug("MQTT test failed: %s", e)
-            return "mqtt_cannot_connect"
+    reason_code = result.get("reason_code")
+    if reason_code is None:
+        return "mqtt_timeout"
+    if not reason_code.is_failure:
+        return None
+    # 134 bad user name or password, 135 not authorized (MQTT 3.1.1 codes 4 and 5)
+    if reason_code.value in (134, 135):
+        return "mqtt_invalid_auth"
+    _LOGGER.debug("MQTT connection refused: %s", reason_code)
+    return "mqtt_cannot_connect"
 
 
 class UNASProOptionsFlow(config_entries.OptionsFlow):
