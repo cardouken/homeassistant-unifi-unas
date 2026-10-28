@@ -93,6 +93,52 @@ async def test_only_changed_settings_reload(hass, entry, ssh):
     assert entry.runtime_data.connection["mqtt_password"] == "newmqtt"
 
 
+async def test_ssh_errors_keep_the_form(hass, entry):
+    with patch(f"{FLOW}.UNASProConfigFlow._probe_ssh", return_value=("invalid_auth", None)):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={
+                "source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id
+            }
+        )
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {
+            "host": "192.168.1.25", "username": "root", "mqtt_host": "192.168.1.111",
+            "mqtt_user": "unas", "mqtt_tls": False, "device_name": "UNAS",
+            "verify_host_key": True,
+        })
+    assert (result["step_id"], result["errors"]) == ("reconfigure", {"base": "invalid_auth"})
+
+
+@pytest.mark.parametrize("mqtt_error", [None, "mqtt_cannot_connect"])
+async def test_switching_to_tls(hass, entry, mqtt_error):
+    with (
+        patch(f"{FLOW}.UNASProConfigFlow._probe_ssh", return_value=(None, NAS)),
+        patch(f"{FLOW}.probe_mqtt", return_value=mqtt_error) as mqtt_probe,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={
+                "source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id
+            }
+        )
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {
+            "host": "192.168.1.25", "username": "root", "mqtt_host": "192.168.1.111",
+            "mqtt_user": "unas", "mqtt_tls": True, "device_name": "UNAS",
+            "verify_host_key": True,
+        })
+        assert result["step_id"] == "reconfigure_mqtt_tls"
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"mqtt_port": 8883, "mqtt_tls_insecure": False}
+        )
+        await hass.async_block_till_done()
+    assert mqtt_probe.call_args.args == ("192.168.1.111", 8883, "unas", "x", True, False)
+    if mqtt_error:
+        assert result["errors"] == {"base": mqtt_error}
+        assert not entry.data.get("mqtt_tls")
+    else:
+        assert result["reason"] == "reconfigure_successful"
+        assert (entry.data["mqtt_tls"], entry.data["mqtt_port"]) == (True, 8883)
+        assert entry.data["host_key"] == PIN
+
+
 async def test_switching_tls_off_goes_back_to_the_plain_port(hass, mqtt_mock, ssh):
     entry = await setup_entry(hass, mqtt_tls=True, mqtt_port=8883, mqtt_tls_insecure=True)
     hass.config_entries.async_update_entry(entry, unique_id="0cea14c0c079")

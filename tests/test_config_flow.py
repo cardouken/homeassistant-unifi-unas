@@ -152,3 +152,56 @@ async def test_ssh_probe_tolerates_a_console_without_identity(hass):
         f"{FLOW}.SSHManager.identity", side_effect=NASCommandError("GET /api/system: refused")
     ):
         assert await flow._probe_ssh("192.0.2.1", "root", "x") == (None, None)
+
+
+async def test_mqtt_is_required(hass):
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    assert result["reason"] == "mqtt_required"
+
+
+@pytest.mark.parametrize("mqtt_error", [None, "mqtt_tls_verify_failed"])
+async def test_tls_asks_for_the_port(hass, mqtt_mock, ssh, mqtt_error):
+    with (
+        patch(f"{FLOW}.UNASProConfigFlow._probe_ssh", return_value=(None, IDENTITY)),
+        patch(f"{FLOW}.probe_mqtt", return_value=mqtt_error) as mqtt_probe,
+    ):
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input(mqtt_tls=True)
+        )
+        assert result["step_id"] == "mqtt_tls"
+        mqtt_probe.assert_not_called()
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"mqtt_port": 8884, "mqtt_tls_insecure": True}
+        )
+        await hass.async_block_till_done()
+    assert mqtt_probe.call_args.args == ("192.168.1.111", 8884, "unas", "x", True, True)
+    if mqtt_error:
+        assert (result["step_id"], result["errors"]) == ("mqtt_tls", {"base": mqtt_error})
+    else:
+        data = result["result"].data
+        assert (data["mqtt_tls"], data["mqtt_port"], data["mqtt_tls_insecure"]) == (
+            True, 8884, True
+        )
+
+
+async def test_unexpected_ssh_probe_errors(hass):
+    from custom_components.unifi_unas.config_flow import UNASProConfigFlow
+
+    flow = UNASProConfigFlow()
+    flow.hass = hass
+    with patch(f"{FLOW}.SSHManager.identity", side_effect=RuntimeError("boom")):
+        assert await flow._probe_ssh("192.0.2.1", "root", "x") == ("unknown", None)
+
+
+async def test_ssh_probe_returns_the_identity(hass):
+    from custom_components.unifi_unas.config_flow import UNASProConfigFlow
+
+    flow = UNASProConfigFlow()
+    flow.hass = hass
+    with patch(f"{FLOW}.SSHManager.identity", return_value=IDENTITY):
+        assert await flow._probe_ssh("192.0.2.1", "root", "x") == (None, IDENTITY)

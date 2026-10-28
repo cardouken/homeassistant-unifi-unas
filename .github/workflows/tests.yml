@@ -34,3 +34,4 @@ jobs:
           uv run --no-project --python 3.14
           --with pytest-homeassistant-custom-component==0.13.373 --with asyncssh
           pytest -q tests --ignore=tests/scripts
+          --cov=custom_components/unifi_unas --cov-fail-under=95
