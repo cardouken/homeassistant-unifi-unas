@@ -1,0 +1,86 @@
+rules:
+  # Bronze
+  action-setup:
+    status: exempt
+    comment: The integration registers no actions.
+  appropriate-polling:
+    status: done
+    comment: Metrics are pushed over MQTT, SSH is polled once a minute for services and backups.
+  brands: done
+  common-modules: done
+  config-flow: done
+  config-flow-test-coverage: done
+  dependency-transparency: done
+  docs-actions:
+    status: exempt
+    comment: The integration registers no actions.
+  docs-conditions:
+    status: exempt
+    comment: No device conditions.
+  docs-high-level-description: done
+  docs-installation-instructions: done
+  docs-removal-instructions: done
+  docs-triggers:
+    status: exempt
+    comment: No device triggers.
+  entity-event-setup: done
+  entity-unique-id: done
+  has-entity-name: done
+  runtime-data: done
+  test-before-configure: done
+  test-before-setup:
+    status: done
+    comment: >-
+      Setup needs the MQTT integration. SSH is checked right after setup so an unreachable
+      NAS doesn't hold back the MQTT entities; a rejected login starts reauthentication.
+  unique-config-entry: done
+
+  # Silver
+  action-exceptions: done
+  config-entry-unloading: done
+  docs-configuration-parameters: done
+  docs-installation-parameters: done
+  entity-unavailable: done
+  integration-owner: done
+  log-when-unavailable:
+    status: todo
+    comment: SSH outages are logged by the coordinator, the monitor going offline is not.
+  parallel-updates: done
+  reauthentication-flow: done
+  test-coverage: done
+
+  # Gold
+  devices: done
+  diagnostics: done
+  discovery: todo
+  discovery-update-info:
+    status: todo
+    comment: A known NAS set up again on a new address updates the existing entry.
+  docs-data-update: done
+  docs-examples: done
+  docs-known-limitations: done
+  docs-supported-devices: done
+  docs-supported-functions: done
+  docs-troubleshooting: done
+  docs-use-cases: done
+  dynamic-devices: done
+  entity-category: done
+  entity-device-class: done
+  entity-disabled-by-default: done
+  entity-translations: done
+  exception-translations:
+    status: todo
+    comment: Action errors are translated, setup and update failures are not yet.
+  icon-translations: done
+  reconfiguration-flow: done
+  repair-issues: done
+  stale-devices: done
+
+  # Platinum
+  async-dependency:
+    status: todo
+    comment: asyncssh is async, the config flow's MQTT check uses paho-mqtt in the executor.
+  inject-websession:
+    status: exempt
+    comment: No HTTP client.
+  strict-typing: todo
