@@ -24,11 +24,13 @@ def mqtt_client(config, will_topic):
     client.username_pw_set(broker.get("user"), broker.get("password"))
     if broker.get("tls"):
         import ssl
+
+        # paho's tls_set() needs ssl.PROTOCOL_TLSv1_2, which Python built on OpenSSL 4 lacks
+        context = ssl.create_default_context()
         if broker.get("tls_insecure"):
-            client.tls_set(cert_reqs=ssl.CERT_NONE)
-            client.tls_insecure_set(True)
-        else:
-            client.tls_set()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+        client.tls_set_context(context)
     client.will_set(will_topic, "offline", retain=True)
     return client
 

@@ -24,3 +24,17 @@ def test_vendored_paho_is_the_one_imported():
     import paho.mqtt.client as mqtt
 
     assert Path(mqtt.__file__).resolve().is_relative_to(unas_common.BUNDLE_DIR / "vendor")
+
+
+def test_tls_uses_an_ssl_context():
+    import ssl
+
+    def client(**tls):
+        config = {"mqtt": {"user": "u", "password": "p", **tls}}
+        return unas_common.mqtt_client(config, "x/availability")
+
+    assert client()._ssl_context is None
+    verified = client(tls=True)._ssl_context
+    assert (verified.check_hostname, verified.verify_mode) == (True, ssl.CERT_REQUIRED)
+    insecure = client(tls=True, tls_insecure=True)._ssl_context
+    assert (insecure.check_hostname, insecure.verify_mode) == (False, ssl.CERT_NONE)

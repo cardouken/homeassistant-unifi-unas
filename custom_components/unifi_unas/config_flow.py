@@ -396,11 +396,12 @@ def probe_mqtt(
     client.on_connect = on_connect
     try:
         if use_tls:
+            # paho's tls_set() needs ssl.PROTOCOL_TLSv1_2, which Python built on OpenSSL 4 lacks
+            context = ssl.create_default_context()
             if tls_insecure:
-                client.tls_set(cert_reqs=ssl.CERT_NONE)
-                client.tls_insecure_set(True)
-            else:
-                client.tls_set()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+            client.tls_set_context(context)
         client.connect(host, port, keepalive=30)
         deadline = time.monotonic() + MQTT_PROBE_TIMEOUT
         while not connected.is_set() and time.monotonic() < deadline:
