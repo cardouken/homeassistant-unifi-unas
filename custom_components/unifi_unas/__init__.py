@@ -75,6 +75,12 @@ class UNASRuntime:
     deployer: Deployer
     reconciler: Reconciler
     ssh: SSHManager
+    connection: dict
+
+
+def connection_data(entry: ConfigEntry) -> dict:
+    # what setup connects with; a pinned host key is recorded at runtime and needs no reload
+    return {key: value for key, value in entry.data.items() if key != CONF_HOST_KEY}
 
 
 type UNASConfigEntry = ConfigEntry[UNASRuntime]
@@ -130,7 +136,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool
     service = UNASServiceCoordinator(hass, entry, ssh)
     deployer = Deployer(hass, entry, ssh, service)
     reconciler = Reconciler(hass, entry, data, service)
-    entry.runtime_data = UNASRuntime(data, service, deployer, reconciler, ssh)
+    entry.runtime_data = UNASRuntime(data, service, deployer, reconciler, ssh, connection_data(entry))
 
     await data.async_start()
 
@@ -145,10 +151,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool
     entry.async_create_background_task(hass, service.async_refresh(), f"{DOMAIN} ssh status")
 
     await _async_publish_interval(hass, entry)
-    entry.async_on_unload(entry.add_update_listener(_async_publish_interval))
+    entry.async_on_unload(entry.add_update_listener(_async_entry_updated))
     async_schedule_scan(hass, entry)
 
     return True
+
+
+async def _async_entry_updated(hass: HomeAssistant, entry: UNASConfigEntry) -> None:
+    if connection_data(entry) != entry.runtime_data.connection:
+        hass.config_entries.async_schedule_reload(entry.entry_id)
+        return
+    await _async_publish_interval(hass, entry)
 
 
 async def _async_publish_interval(hass: HomeAssistant, entry: UNASConfigEntry) -> None:

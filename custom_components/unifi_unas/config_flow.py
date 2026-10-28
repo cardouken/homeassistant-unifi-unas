@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import ssl
 import threading
@@ -42,11 +41,11 @@ from .const import (
     CONF_MQTT_TLS,
     CONF_MQTT_TLS_INSECURE,
     CONF_VERIFY_HOST_KEY,
+    CONF_HOST_KEY,
     CONF_SCAN_INTERVAL,
     CONF_DEVICE_MODEL,
     CONF_DEVICE_NAME,
     DEVICE_MODELS,
-    HA_SSH_KEY_PATHS,
     SYSID_MODELS,
 )
 from .ssh_manager import NASCommandError, SSHManager
@@ -55,6 +54,7 @@ _LOGGER = logging.getLogger(__name__)
 
 MQTT_PROBE_TIMEOUT = 5
 SSH_PROBE_TIMEOUT = 10
+SECRET_FIELDS = (CONF_PASSWORD, CONF_MQTT_PASSWORD)
 
 MODEL_SELECTOR = SelectSelector(
     SelectSelectorConfig(
@@ -94,47 +94,49 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         errors: dict[str, str] = {}
-        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        entry = self._get_reconfigure_entry()
 
         if user_input is not None:
-            user_input = {**user_input, CONF_DEVICE_MODEL: entry.data[CONF_DEVICE_MODEL]}
-            if error_key := await self._test_ssh(user_input[CONF_HOST], user_input[CONF_USERNAME],
-                                                   user_input.get(CONF_PASSWORD)):
+            # the form never sends passwords back, a blank one keeps what is stored
+            data = {
+                **entry.data,
+                **{key: value for key, value in user_input.items() if value or key not in SECRET_FIELDS},
+            }
+            error_key, identity = await self._probe_ssh(data[CONF_HOST], data[CONF_USERNAME], data.get(CONF_PASSWORD))
+            serial = ((identity or {}).get("serial") or "").lower()
+            if error_key:
                 errors["base"] = error_key
-            elif user_input.get(CONF_MQTT_TLS):
-                self._pending_input = user_input
-                self._reconfigure_entry = entry
-                return await self.async_step_reconfigure_mqtt_tls()
-            elif error_key := await self._test_mqtt(user_input[CONF_MQTT_HOST], user_input[CONF_MQTT_USER],
-                                                    user_input[CONF_MQTT_PASSWORD]):
-                errors["base"] = error_key
+            elif serial and entry.unique_id not in (serial, entry.data[CONF_HOST]):
+                return self.async_abort(reason="wrong_device")
             else:
-                await self.async_set_unique_id(user_input[CONF_HOST])
-                device_name = (
-                    user_input.get(CONF_DEVICE_NAME)
-                    or DEVICE_MODELS[user_input[CONF_DEVICE_MODEL]]
-                )
-                self.hass.config_entries.async_update_entry(
-                    entry,
-                    title=f"{device_name} ({user_input[CONF_HOST]})",
-                    data=user_input,
-                )
-                await self.hass.config_entries.async_reload(entry.entry_id)
-                return self.async_abort(reason="reconfigure_successful")
+                if data[CONF_HOST] != entry.data[CONF_HOST]:
+                    # the pin belongs to the old address, the next connection pins again
+                    data.pop(CONF_HOST_KEY, None)
+                if not data.get(CONF_MQTT_TLS):
+                    # the TLS step set these, plain MQTT is on the default port
+                    data.pop(CONF_MQTT_PORT, None)
+                    data.pop(CONF_MQTT_TLS_INSECURE, None)
+                self._pending_input = data
+                self._serial = serial or None
+                if data.get(CONF_MQTT_TLS):
+                    return await self.async_step_reconfigure_mqtt_tls()
+                if error_key := await self._test_mqtt(
+                    data[CONF_MQTT_HOST], data[CONF_MQTT_USER], data[CONF_MQTT_PASSWORD]
+                ):
+                    errors["base"] = error_key
+                else:
+                    return self._update_reconfigured(data)
 
         reconfigure_schema = vol.Schema(
             {
                 vol.Required(CONF_HOST, default=entry.data[CONF_HOST]): str,
                 vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, DEFAULT_USERNAME)): str,
-                vol.Optional(CONF_PASSWORD, default=entry.data.get(CONF_PASSWORD) or ""): str,
+                vol.Optional(CONF_PASSWORD): str,
                 vol.Required(CONF_MQTT_HOST, default=entry.data[CONF_MQTT_HOST]): str,
                 vol.Required(CONF_MQTT_USER, default=entry.data[CONF_MQTT_USER]): str,
-                vol.Required(CONF_MQTT_PASSWORD, default=entry.data[CONF_MQTT_PASSWORD]): str,
+                vol.Optional(CONF_MQTT_PASSWORD): str,
                 vol.Optional(CONF_MQTT_TLS, default=entry.data.get(CONF_MQTT_TLS, False)): BooleanSelector(),
-                vol.Optional(
-                    CONF_DEVICE_NAME,
-                    default=entry.data.get(CONF_DEVICE_NAME) or "UNAS",
-                ): str,
+                vol.Optional(CONF_DEVICE_NAME, default=entry.data.get(CONF_DEVICE_NAME) or "UNAS"): str,
                 vol.Optional(
                     CONF_VERIFY_HOST_KEY,
                     default=entry.data.get(CONF_VERIFY_HOST_KEY, False),
@@ -153,7 +155,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         errors: dict[str, str] = {}
-        entry = self._reconfigure_entry
+        entry = self._get_reconfigure_entry()
 
         if user_input is not None:
             merged = {**self._pending_input, **user_input}
@@ -166,18 +168,7 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ):
                 errors["base"] = error_key
             else:
-                await self.async_set_unique_id(merged[CONF_HOST])
-                device_name = (
-                    merged.get(CONF_DEVICE_NAME)
-                    or DEVICE_MODELS[merged[CONF_DEVICE_MODEL]]
-                )
-                self.hass.config_entries.async_update_entry(
-                    entry,
-                    title=f"{device_name} ({merged[CONF_HOST]})",
-                    data=merged,
-                )
-                await self.hass.config_entries.async_reload(entry.entry_id)
-                return self.async_abort(reason="reconfigure_successful")
+                return self._update_reconfigured(merged)
 
         schema = vol.Schema({
             vol.Optional(
@@ -193,6 +184,17 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         })
         return self.async_show_form(
             step_id="reconfigure_mqtt_tls", data_schema=schema, errors=errors
+        )
+
+    def _update_reconfigured(self, data: dict[str, Any]) -> FlowResult:
+        entry = self._get_reconfigure_entry()
+        device_name = data.get(CONF_DEVICE_NAME) or DEVICE_MODELS[data[CONF_DEVICE_MODEL]]
+        # the update listener reloads when connection settings changed
+        return self.async_update_and_abort(
+            entry,
+            unique_id=self._serial or entry.unique_id,
+            title=f"{device_name} ({data[CONF_HOST]})",
+            data=data,
         )
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -284,12 +286,19 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry = self._get_reauth_entry()
         if user_input is not None:
             password = user_input.get(CONF_PASSWORD) or ""
-            if error_key := await self._test_ssh(entry.data[CONF_HOST], user_input[CONF_USERNAME], password):
+            error_key, identity = await self._probe_ssh(entry.data[CONF_HOST], user_input[CONF_USERNAME], password)
+            serial = ((identity or {}).get("serial") or "").lower()
+            if error_key:
                 errors["base"] = error_key
+            elif serial and entry.unique_id not in (serial, entry.data[CONF_HOST]):
+                return self.async_abort(reason="wrong_device")
             else:
-                return self.async_update_reload_and_abort(
-                    entry, data_updates={CONF_USERNAME: user_input[CONF_USERNAME], CONF_PASSWORD: password}
-                )
+                updates = {CONF_USERNAME: user_input[CONF_USERNAME], CONF_PASSWORD: password}
+                if all(entry.data.get(key) == value for key, value in updates.items()):
+                    # same login, fixed on the NAS side; polling stopped at the auth failure
+                    self.hass.config_entries.async_schedule_reload(entry.entry_id)
+                # changed credentials reload through the update listener
+                return self.async_update_and_abort(entry, data_updates=updates)
 
         return self.async_show_form(
             step_id="reauth_confirm",
@@ -331,42 +340,6 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return "unknown", None
         finally:
             await manager.disconnect()
-
-    async def _test_ssh(self, host: str, username: str, password: str | None) -> str | None:
-        try:
-            client_keys = None
-            if not password:
-                for key_path in HA_SSH_KEY_PATHS:
-                    if key_path.exists():
-                        client_keys = [str(key_path)]
-                        _LOGGER.debug("Using SSH key from %s", key_path)
-                        break
-
-            conn = await asyncio.wait_for(
-                asyncssh.connect(
-                    host,
-                    username=username,
-                    password=password if password else None,
-                    client_keys=client_keys,
-                    known_hosts=None,
-                ),
-                timeout=10.0,
-            )
-            result = await conn.run("echo 'test'", check=True)
-            conn.close()
-            await conn.wait_closed()
-
-            if result.stdout.strip() != "test":
-                return "unknown"
-            return None
-        except asyncssh.PermissionDenied:
-            return "invalid_auth"
-        except asyncssh.Error:
-            return "cannot_connect"
-        except asyncio.TimeoutError:
-            return "timeout_connect"
-        except Exception:
-            return "unknown"
 
     async def _test_mqtt(
         self, host: str, username: str, password: str,

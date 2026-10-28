@@ -53,6 +53,7 @@ class FakeSSH:
         self.backup_tasks = [TASK]
         self.server_host_key = None
         self.pinned_host_key = kwargs.get("pinned_host_key")
+        self.kwargs = kwargs
         FakeSSH.instances.append(self)
 
     async def bundle_status(self, device_model, mqtt_root):

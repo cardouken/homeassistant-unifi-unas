@@ -35,7 +35,7 @@
       },
       "reconfigure": {
         "title": "Reconfigure UniFi UNAS",
-        "description": "Update your UniFi UNAS connection settings. The integration reconnects, and the scripts on the UNAS are updated if their settings changed.",
+        "description": "Update the connection settings for the UniFi UNAS at {host}. The scripts on the UNAS are updated if their settings changed. A new address is only accepted for the same NAS.",
         "data": {
           "host": "Host (UNAS IP Address)",
           "username": "UNAS SSH username (root by default)",
@@ -50,7 +50,9 @@
         "data_description": {
           "mqtt_tls": "Only enable if your MQTT broker is configured for TLS (port 8883). Leave off for standard setups.",
           "device_name": "Changes device display names only. Entity IDs are set at initial setup and cannot be changed here.",
-          "verify_host_key": "Verify the NAS SSH host key. On the first connection the key is recorded (trust-on-first-use) and checked on every connection after that. Leave off to keep the current permissive behavior."
+          "verify_host_key": "Verify the NAS SSH host key. On the first connection the key is recorded (trust-on-first-use) and checked on every connection after that. Leave off to keep the current permissive behavior. A new address pins the key again on the first connection.",
+          "password": "Leave blank to keep the current password.",
+          "mqtt_password": "Leave blank to keep the current password."
         }
       },
       "reconfigure_mqtt_tls": {
@@ -94,7 +96,8 @@
       "already_configured": "This UniFi UNAS is already configured.",
       "mqtt_required": "MQTT integration must be installed and configured before setting up UniFi UNAS. Please add the MQTT integration first, then try again.",
       "reconfigure_successful": "Configuration updated successfully. The integration is reconnecting with the new settings.",
-      "reauth_successful": "Logged in again, the integration is reloading."
+      "reauth_successful": "Logged in again, the integration is reloading.",
+      "wrong_device": "That address belongs to a different NAS. Add it as a new integration instead."
     }
   },
   "options": {

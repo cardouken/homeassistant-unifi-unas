@@ -5,7 +5,7 @@ from homeassistant.config_entries import SOURCE_REAUTH
 
 from conftest import DOMAIN, settle, setup_entry
 
-TEST_SSH = "custom_components.unifi_unas.config_flow.UNASProConfigFlow._test_ssh"
+PROBE = "custom_components.unifi_unas.config_flow.UNASProConfigFlow._probe_ssh"
 
 
 async def start_reauth(hass, ssh):
@@ -21,7 +21,7 @@ async def start_reauth(hass, ssh):
 
 async def test_rejected_login_starts_reauth(hass, mqtt_mock, ssh):
     entry, flow_id = await start_reauth(hass, ssh)
-    with patch(TEST_SSH, return_value=None):
+    with patch(PROBE, return_value=(None, {"serial": "0CEA14C0C079"})):
         result = await hass.config_entries.flow.async_configure(flow_id, {"username": "root", "password": "new"})
         await settle(hass)
     assert result["reason"] == "reauth_successful"
@@ -32,7 +32,25 @@ async def test_rejected_login_starts_reauth(hass, mqtt_mock, ssh):
 
 async def test_reauth_keeps_asking_on_a_wrong_password(hass, mqtt_mock, ssh):
     entry, flow_id = await start_reauth(hass, ssh)
-    with patch(TEST_SSH, return_value="invalid_auth"):
+    with patch(PROBE, return_value=("invalid_auth", None)):
         result = await hass.config_entries.flow.async_configure(flow_id, {"username": "root", "password": "nope"})
     assert result["errors"] == {"base": "invalid_auth"}
     assert entry.data["password"] == "old"
+
+
+async def test_reauth_refuses_a_different_nas(hass, mqtt_mock, ssh):
+    entry, flow_id = await start_reauth(hass, ssh)
+    hass.config_entries.async_update_entry(entry, unique_id="0cea14c0c079")
+    with patch(PROBE, return_value=(None, {"serial": "aabbccddeeff"})):
+        result = await hass.config_entries.flow.async_configure(flow_id, {"username": "root", "password": "new"})
+    assert result["reason"] == "wrong_device"
+    assert entry.data["password"] == "old"
+
+
+async def test_reauth_with_the_same_login_reloads(hass, mqtt_mock, ssh):
+    entry, flow_id = await start_reauth(hass, ssh)
+    with patch(PROBE, return_value=(None, {"serial": "0CEA14C0C079"})):
+        result = await hass.config_entries.flow.async_configure(flow_id, {"username": "root", "password": "old"})
+        await settle(hass)
+    assert result["reason"] == "reauth_successful"
+    assert len(ssh.instances) == 2
