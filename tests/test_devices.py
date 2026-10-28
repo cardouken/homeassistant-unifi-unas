@@ -16,7 +16,9 @@ NAS = {
 
 def device(hass, identifier=None):
     suffix = f"_{identifier}" if identifier else ""
-    return dr.async_get(hass).async_get_device_by_identifier((DOMAIN, f"{ENTRY_ID}{suffix}"), ENTRY_ID)
+    return dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"{ENTRY_ID}{suffix}"), ENTRY_ID
+    )
 
 
 @pytest.mark.parametrize("model,manufacturer", [
@@ -45,7 +47,9 @@ async def test_main_device_comes_from_the_nas(hass, mqtt_mock, ssh):
     main = device(hass)
     assert (main.name, main.name_by_user, main.area_id) == ("UNAS", "LIL NAS X", "hallway")
     assert (main.manufacturer, main.model, main.model_id) == ("Ubiquiti", "UNAS Pro", "UNAS-Pro")
-    assert (main.serial_number, main.sw_version, main.hw_version) == ("0cea14c0c079", "6.0.11", "960263")
+    assert (main.serial_number, main.sw_version, main.hw_version) == (
+        "0cea14c0c079", "6.0.11", "960263"
+    )
     assert (dr.CONNECTION_NETWORK_MAC, "0c:ea:14:c0:c0:79") in main.connections
     assert main.configuration_url == "https://192.168.1.25"
 
@@ -71,7 +75,9 @@ async def test_a_swapped_drive_updates_its_device(hass, mqtt_mock, ssh):
     fire_monitor_cycle(hass)
     await settle(hass)
     before = device(hass, "hdd_1")
-    entity_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{ENTRY_ID}_unas_hdd_1_temperature")
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{ENTRY_ID}_unas_hdd_1_temperature"
+    )
 
     for key, value in {"model": "WDC WD180EDGZ", "serial": "9MG0", "firmware": "85.00A85"}.items():
         fire(hass, f"hdd/1/{key}", value)
@@ -82,7 +88,9 @@ async def test_a_swapped_drive_updates_its_device(hass, mqtt_mock, ssh):
     assert (after.manufacturer, after.model, after.serial_number, after.sw_version) == (
         "Western Digital", "WDC WD180EDGZ", "9MG0", "85.00A85"
     )
-    assert er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{ENTRY_ID}_unas_hdd_1_temperature") == entity_id
+    assert er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{ENTRY_ID}_unas_hdd_1_temperature"
+    ) == entity_id
 
 
 async def test_main_device_without_the_product_table(hass, mqtt_mock, ssh):

@@ -116,9 +116,10 @@ class Reconciler:
                 if entity.unique_id.startswith(prefix):
                     ent_reg.async_remove(entity.entity_id)
         if category in TOPIC_PREFIX:
-            self._clear_topics(f"{self.data.mqtt_client.mqtt_root}/{TOPIC_PREFIX[category]}/{item}/")
+            self._clear_topics(category, item)
 
-    def _clear_topics(self, prefix: str) -> None:
+    def _clear_topics(self, category: str, item: str) -> None:
+        prefix = f"{self.data.mqtt_client.mqtt_root}/{TOPIC_PREFIX[category]}/{item}/"
         topics = sorted(topic for topic in self.data.mqtt_client.topics if topic.startswith(prefix))
 
         async def clear() -> None:
@@ -160,5 +161,5 @@ class Reconciler:
         for category, item in items:
             self._forget(category, item)
             if category in TOPIC_PREFIX:
-                self._clear_topics(f"{self.data.mqtt_client.mqtt_root}/{TOPIC_PREFIX[category]}/{item}/")
+                self._clear_topics(category, item)
         return True

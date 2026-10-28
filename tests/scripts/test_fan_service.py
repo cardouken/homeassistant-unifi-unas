@@ -14,7 +14,9 @@ def service(tmp_path, monkeypatch):
     (tmp_path / "pwm1").write_text("64")
     svc = fc.FanService()
     svc.published = []
-    svc.client.publish = lambda topic, payload, retain=False: svc.published.append((topic, payload, retain))
+    svc.client.publish = (
+        lambda topic, payload, retain=False: svc.published.append((topic, payload, retain))
+    )
     return svc
 
 
@@ -46,7 +48,9 @@ def test_unknown_topics_are_ignored(service):
     assert service.settings == fc.DEFAULT_SETTINGS
 
 
-@pytest.mark.parametrize("payload,expected", [("10", 10), ("10.0", 10), ("2", 5), ("300", 60), ("fast", 30)])
+@pytest.mark.parametrize(
+    "payload,expected", [("10", 10), ("10.0", 10), ("2", 5), ("300", 60), ("fast", 30)]
+)
 def test_monitor_interval_is_clamped(service, payload, expected):
     service._on_message(None, None, message(fc.MQTT_MONITOR_INTERVAL, payload))
     assert service.monitor_interval == expected

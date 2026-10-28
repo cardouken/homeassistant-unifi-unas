@@ -56,9 +56,13 @@ class UNASFanSelect(UNASEntity, SelectEntity):
 
 class UNASFanModeSelect(UNASFanSelect):
     def __init__(self, coordinator: UNASDataCoordinator, ssh: SSHManager) -> None:
-        super().__init__(coordinator, "fan_mode", SelectEntityDescription(key="fan_mode", translation_key="fan_mode"))
+        super().__init__(
+            coordinator, "fan_mode",
+            SelectEntityDescription(key="fan_mode", translation_key="fan_mode"),
+        )
         self._ssh = ssh
-        base_type = "UNVR" if coordinator.entry.data[CONF_DEVICE_MODEL].startswith("UNVR") else "UNAS"
+        model = coordinator.entry.data[CONF_DEVICE_MODEL]
+        base_type = "UNVR" if model.startswith("UNVR") else "UNAS"
         self._modes = {
             "unas_managed": f"{base_type} Managed",
             "auto": MODE_CUSTOM_CURVE,
@@ -84,7 +88,9 @@ class UNASFanModeSelect(UNASFanSelect):
         if mode == "set_speed":
             # start from the speed the fans run at now instead of jumping
             pwm = self.fan.pwm
-            await async_publish_setting(self.coordinator, "speed", pwm if pwm is not None else DEFAULT_SPEED)
+            await async_publish_setting(
+                self.coordinator, "speed", pwm if pwm is not None else DEFAULT_SPEED
+            )
         await async_publish_setting(self.coordinator, "mode", mode)
         if mode == "unas_managed":
             try:
@@ -94,10 +100,14 @@ class UNASFanModeSelect(UNASFanSelect):
 
 
 class UNASFanOptionSelect(UNASFanSelect):
-    def __init__(self, coordinator: UNASDataCoordinator, setting: str, labels: dict[str, str]) -> None:
+    def __init__(
+            self, coordinator: UNASDataCoordinator, setting: str, labels: dict[str, str]
+    ) -> None:
         super().__init__(
             coordinator, setting,
-            SelectEntityDescription(key=setting, translation_key=setting, entity_category=EntityCategory.CONFIG),
+            SelectEntityDescription(
+                key=setting, translation_key=setting, entity_category=EntityCategory.CONFIG
+            ),
         )
         self._setting = setting
         self._labels = labels

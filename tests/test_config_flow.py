@@ -9,7 +9,10 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from conftest import DOMAIN, ENTRY_ID, entry_data, fire, settle, setup_entry
 
 FLOW = "custom_components.unifi_unas.config_flow"
-IDENTITY = {"sysid": "ea51", "serial": "0CEA14C0C079", "product": "UNAS Pro", "name": "UniFi Network Attached Storage Pro"}
+IDENTITY = {
+    "sysid": "ea51", "serial": "0CEA14C0C079", "product": "UNAS Pro",
+    "name": "UniFi Network Attached Storage Pro",
+}
 
 
 def user_input(**overrides):
@@ -23,8 +26,12 @@ async def submit(hass, identity=IDENTITY, ssh_error=None, mqtt_error=None, **ove
         patch(f"{FLOW}.UNASProConfigFlow._probe_ssh", return_value=(ssh_error, identity)),
         patch(f"{FLOW}.probe_mqtt", return_value=mqtt_error),
     ):
-        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input(**overrides))
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], user_input(**overrides)
+        )
         await hass.async_block_till_done()
     return result
 
@@ -32,20 +39,31 @@ async def submit(hass, identity=IDENTITY, ssh_error=None, mqtt_error=None, **ove
 async def test_the_model_and_unique_id_come_from_the_nas(hass, mqtt_mock, ssh):
     result = await submit(hass)
     entry = result["result"]
-    assert (entry.unique_id, entry.data["device_model"], entry.title) == ("0cea14c0c079", "UNAS_PRO", "UNAS (192.168.1.25)")
+    assert (entry.unique_id, entry.data["device_model"], entry.title) == (
+        "0cea14c0c079", "UNAS_PRO", "UNAS (192.168.1.25)"
+    )
     assert entry.options == {"scan_interval": 5}
 
 
 async def test_an_unrecognized_device_needs_confirmation(hass, mqtt_mock, ssh):
-    udm = {"sysid": "ea15", "serial": "aabbccddeeff", "product": "UDM SE", "name": "UniFi Dream Machine SE"}
+    udm = {
+        "sysid": "ea15", "serial": "aabbccddeeff", "product": "UDM SE",
+        "name": "UniFi Dream Machine SE",
+    }
     with (
         patch(f"{FLOW}.UNASProConfigFlow._probe_ssh", return_value=(None, udm)),
         patch(f"{FLOW}.probe_mqtt", return_value=None),
     ):
-        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
         result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input())
-        assert (result["step_id"], result["description_placeholders"]["device"]) == ("unrecognized_device", "UDM SE")
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"device_model": "UNAS_PRO_8"})
+        assert (result["step_id"], result["description_placeholders"]["device"]) == (
+            "unrecognized_device", "UDM SE"
+        )
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"device_model": "UNAS_PRO_8"}
+        )
         await hass.async_block_till_done()
     assert result["result"].data["device_model"] == "UNAS_PRO_8"
 
@@ -55,9 +73,13 @@ async def test_a_console_without_identity_still_works_by_host(hass, mqtt_mock, s
         patch(f"{FLOW}.UNASProConfigFlow._probe_ssh", return_value=(None, None)),
         patch(f"{FLOW}.probe_mqtt", return_value=None),
     ):
-        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
         result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input())
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {"device_model": "UNAS_PRO"})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {"device_model": "UNAS_PRO"}
+        )
         await hass.async_block_till_done()
     assert result["result"].unique_id == "192.168.1.25"
 
@@ -78,14 +100,18 @@ async def test_a_configured_host_aborts_before_any_network_test(hass, mqtt_mock,
     MockConfigEntry(domain=DOMAIN, data=entry_data(), unique_id="192.168.1.25").add_to_hass(hass)
     probe = AsyncMock(return_value=(None, IDENTITY))
     with patch(f"{FLOW}.UNASProConfigFlow._probe_ssh", probe):
-        result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": config_entries.SOURCE_USER}
+        )
         result = await hass.config_entries.flow.async_configure(result["flow_id"], user_input())
     assert result["reason"] == "already_configured"
     probe.assert_not_called()
 
 
 async def test_the_same_nas_on_a_new_address_updates_the_entry(hass, mqtt_mock, ssh):
-    entry = MockConfigEntry(domain=DOMAIN, data=entry_data(), unique_id="0cea14c0c079", version=2, minor_version=2)
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=entry_data(), unique_id="0cea14c0c079", version=2, minor_version=2
+    )
     entry.add_to_hass(hass)
     result = await submit(hass, host="192.168.1.99")
     assert result["reason"] == "already_configured"
@@ -95,7 +121,8 @@ async def test_the_same_nas_on_a_new_address_updates_the_entry(hass, mqtt_mock, 
 async def test_existing_entries_adopt_the_serial(hass, mqtt_mock, ssh):
     entry = await setup_entry(hass)
     assert entry.unique_id == "192.168.1.25"
-    fire(hass, "system/device", json.dumps({"sysid": "ea51", "serial": "0cea14c0c079", "name": "UNAS Pro"}))
+    device = {"sysid": "ea51", "serial": "0cea14c0c079", "name": "UNAS Pro"}
+    fire(hass, "system/device", json.dumps(device))
     await settle(hass)
     assert entry.unique_id == "0cea14c0c079"
     assert entry.entry_id == ENTRY_ID
@@ -121,5 +148,7 @@ async def test_ssh_probe_tolerates_a_console_without_identity(hass):
 
     flow = UNASProConfigFlow()
     flow.hass = hass
-    with patch(f"{FLOW}.SSHManager.identity", side_effect=NASCommandError("GET /api/system: refused")):
+    with patch(
+        f"{FLOW}.SSHManager.identity", side_effect=NASCommandError("GET /api/system: refused")
+    ):
         assert await flow._probe_ssh("192.0.2.1", "root", "x") == (None, None)

@@ -44,7 +44,10 @@ class FanState:
             mode=mode,
             speed=speed,
             pwm=_int(data.get("unas_fan_speed")),
-            curve={key: value for key in CURVE_KEYS if (value := _int(data.get(f"fan_curve_{key}"))) is not None},
+            curve={
+                key: value for key in CURVE_KEYS
+                if (value := _int(data.get(f"fan_curve_{key}"))) is not None
+            },
             temp_metric=data.get("fan_curve_temp_metric"),
             response_speed=data.get("fan_curve_response_speed"),
         )

@@ -9,7 +9,14 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntryType, DeviceInfo
 
-from .const import CONF_DEVICE_MODEL, CONF_HOST, DOMAIN, SYSID_MODELS, format_remote_type, get_device_info
+from .const import (
+    CONF_DEVICE_MODEL,
+    CONF_HOST,
+    DOMAIN,
+    SYSID_MODELS,
+    format_remote_type,
+    get_device_info,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,7 +92,9 @@ def main_connections(nas: dict[str, Any] | None) -> set[tuple[str, str]]:
 
 
 @callback
-def async_register_main_device(hass: HomeAssistant, entry: ConfigEntry, data: dict[str, Any]) -> None:
+def async_register_main_device(
+        hass: HomeAssistant, entry: ConfigEntry, data: dict[str, Any]
+) -> None:
     nas = nas_info(data)
     dr.async_get(hass).async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -102,11 +111,15 @@ def main_device(entry: ConfigEntry) -> DeviceInfo:
 
 
 def _parent_id(hass: HomeAssistant, entry: ConfigEntry) -> str | None:
-    parent = dr.async_get(hass).async_get_device_by_identifier((DOMAIN, entry.entry_id), entry.entry_id)
+    parent = dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, entry.entry_id), entry.entry_id
+    )
     return parent.id if parent else None
 
 
-def drive_device(hass: HomeAssistant, entry: ConfigEntry, category: str, slot: str, data: dict[str, Any]) -> DeviceInfo:
+def drive_device(
+        hass: HomeAssistant, entry: ConfigEntry, category: str, slot: str, data: dict[str, Any]
+) -> DeviceInfo:
     prefix, label = DRIVE_KINDS[category]
     model = _text(data.get(f"unas_{prefix}_{slot}_model"))
     return DeviceInfo(
@@ -157,7 +170,8 @@ class DeviceSync:
     def _check_identity(self, nas: dict[str, Any]) -> None:
         if serial := nas.get("serial"):
             serial = str(serial).lower()
-            others = [e for e in self.hass.config_entries.async_entries(DOMAIN) if e is not self.entry]
+            entries = self.hass.config_entries.async_entries(DOMAIN)
+            others = [e for e in entries if e is not self.entry]
             if self.entry.unique_id != serial and all(e.unique_id != serial for e in others):
                 # entries from before 0.10 were keyed by IP
                 _LOGGER.info("Identifying %s by its serial from now on", self.entry.title)
@@ -179,7 +193,9 @@ class DeviceSync:
         if nas and nas != self._applied.get("main"):
             if device := dev_reg.async_get_device_by_identifier((DOMAIN, entry_id), entry_id):
                 dev_reg.async_update_device(
-                    device.id, new_connections=main_connections(nas), **main_device_fields(self.entry, nas)
+                    device.id,
+                    new_connections=main_connections(nas),
+                    **main_device_fields(self.entry, nas),
                 )
             self._applied["main"] = nas
             self._check_identity(nas)
@@ -199,11 +215,15 @@ class DeviceSync:
                 key = f"{prefix}_{slot}"
                 if wanted == self._applied.get(key):
                     continue
-                device = dev_reg.async_get_device_by_identifier((DOMAIN, f"{entry_id}_{key}"), entry_id)
+                device = dev_reg.async_get_device_by_identifier(
+                    (DOMAIN, f"{entry_id}_{key}"), entry_id
+                )
                 if device is None:
                     continue
                 if device.serial_number not in (None, wanted["serial_number"]):
-                    _LOGGER.info("%s %s now holds %s (was %s)", prefix.upper(), slot, wanted["serial_number"],
-                                 device.serial_number)
+                    _LOGGER.info(
+                        "%s %s now holds %s (was %s)", prefix.upper(), slot,
+                        wanted["serial_number"], device.serial_number,
+                    )
                 dev_reg.async_update_device(device.id, **wanted)
                 self._applied[key] = wanted

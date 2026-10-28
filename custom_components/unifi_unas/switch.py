@@ -13,7 +13,9 @@ from .entity import UNASEntity
 
 PARALLEL_UPDATES = 1
 
-SCHEDULE = SwitchEntityDescription(key="schedule_enabled", translation_key="backup_schedule_enabled")
+SCHEDULE = SwitchEntityDescription(
+    key="schedule_enabled", translation_key="backup_schedule_enabled"
+)
 
 
 async def async_setup_entry(
@@ -26,7 +28,8 @@ async def async_setup_entry(
     @callback
     def add_backups(task_ids: list[str]) -> None:
         async_add_entities(
-            BackupScheduleSwitch(coordinator, coordinator.find_backup_task(task_id)) for task_id in task_ids
+            BackupScheduleSwitch(coordinator, coordinator.find_backup_task(task_id))
+            for task_id in task_ids
         )
 
     entry.runtime_data.reconciler.register("backups", add_backups)
@@ -44,7 +47,8 @@ class BackupScheduleSwitch(UNASEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        return self.coordinator.ready and self.coordinator.find_backup_task(self._task_id) is not None
+        task = self.coordinator.find_backup_task(self._task_id)
+        return self.coordinator.ready and task is not None
 
     @property
     def is_on(self) -> bool:
@@ -62,6 +66,8 @@ class BackupScheduleSwitch(UNASEntity, SwitchEntity):
             await self.coordinator.ssh_manager.set_backup_schedule(self._task_id, enabled)
         except Exception as err:
             raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="schedule_failed", translation_placeholders={"error": str(err)}
+                translation_domain=DOMAIN,
+                translation_key="schedule_failed",
+                translation_placeholders={"error": str(err)},
             ) from err
         await self.coordinator.async_request_refresh()

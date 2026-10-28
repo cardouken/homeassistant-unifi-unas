@@ -8,13 +8,18 @@ import pytest
 import status
 from fakes import fake_connection, json_body
 
-TASK = {"id": "198597d5-df3e", "name": "B2 backup", "schedule": {"enable": True, "firstRunTime": "2:30"}}
+UIDB_PRO = {"sysid": "ea51", "sku": "UNAS-Pro", "product": {"abbrev": "UNAS Pro"}}
+TASK = {
+    "id": "198597d5-df3e", "name": "B2 backup", "schedule": {"enable": True, "firstRunTime": "2:30"}
+}
 
 
 @pytest.fixture
 def users(tmp_path, monkeypatch):
     path = tmp_path / "users.json"
-    path.write_text(json.dumps([{"id": "member", "isOwner": False}, {"id": "owner", "isOwner": True}]))
+    path.write_text(
+        json.dumps([{"id": "member", "isOwner": False}, {"id": "owner", "isOwner": True}])
+    )
     monkeypatch.setattr(status, "USERS_FILE", str(path))
     return path
 
@@ -24,7 +29,9 @@ def api(monkeypatch, users):
     requests = []
 
     def install(**kwargs):
-        monkeypatch.setattr(status.http.client, "HTTPConnection", fake_connection(requests=requests, **kwargs))
+        monkeypatch.setattr(
+            status.http.client, "HTTPConnection", fake_connection(requests=requests, **kwargs)
+        )
         return requests
 
     return install
@@ -32,7 +39,8 @@ def api(monkeypatch, users):
 
 def test_status_reports_services_files_and_tasks(tmp_path, monkeypatch, api):
     monkeypatch.setattr(
-        status.subprocess, "run", lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout="active\n")
+        status.subprocess, "run",
+        lambda args, **kwargs: subprocess.CompletedProcess(args, 0, stdout="active\n"),
     )
     requests = api(body=json_body({"err": None, "data": [TASK]}))
     script = tmp_path / "fan_control.py"
@@ -69,7 +77,10 @@ def test_owner_falls_back_to_the_first_user(users):
 
 
 def test_set_schedule_only_changes_enable(api):
-    requests = api(body=lambda method, path: json_body({"err": None, "data": [TASK] if method == "GET" else {}}))
+    def body(method, path):
+        return json_body({"err": None, "data": [TASK] if method == "GET" else {}})
+
+    requests = api(body=body)
     assert status.main(["set-schedule", TASK["id"], "off"]) == 0
     method, path, body, _ = requests[-1]
     assert (method, path) == ("PATCH", f"/api/v1/remote-backup/tasks/{TASK['id']}")
@@ -97,9 +108,11 @@ def test_bad_arguments_never_reach_the_api(api, argv):
 def test_identity_names_the_console(tmp_path, monkeypatch):
     system = {"hardware": {"sysid": 59985, "serialno": "0cea14c0c079", "shortname": "UNASPRO",
                            "name": "UniFi Network Attached Storage Pro"}}
-    monkeypatch.setattr(status.http.client, "HTTPConnection", fake_connection(body=json_body(system)))
+    monkeypatch.setattr(
+        status.http.client, "HTTPConnection", fake_connection(body=json_body(system))
+    )
     table = tmp_path / "uidb.json"
-    table.write_text(json.dumps({"devices": [{"sysid": "ea51", "sku": "UNAS-Pro", "product": {"abbrev": "UNAS Pro"}}]}))
+    table.write_text(json.dumps({"devices": [UIDB_PRO]}))
     monkeypatch.setattr(status, "UIDB_FILE", str(table))
     assert status.identity() == {
         "sysid": "ea51", "serial": "0cea14c0c079", "shortname": "UNASPRO",
@@ -108,6 +121,8 @@ def test_identity_names_the_console(tmp_path, monkeypatch):
 
 
 def test_identity_fails_off_a_unifi_console(monkeypatch, capsys):
-    monkeypatch.setattr(status.http.client, "HTTPConnection", fake_connection(error=OSError("connection refused")))
+    monkeypatch.setattr(
+        status.http.client, "HTTPConnection", fake_connection(error=OSError("connection refused"))
+    )
     assert status.main(["identity"]) == 1
     assert "api/system" in json.loads(capsys.readouterr().out)["error"]

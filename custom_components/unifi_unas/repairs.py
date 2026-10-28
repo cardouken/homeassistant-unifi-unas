@@ -10,7 +10,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
 from .const import CONF_HOST, CONF_HOST_KEY, DOMAIN
-from .stale_topics import ISSUE_ID as STALE_TOPICS_ISSUE, async_clear_topics, async_find_stale_topics
+from .stale_topics import ISSUE_ID as STALE_TOPICS_ISSUE
+from .stale_topics import async_clear_topics, async_find_stale_topics
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,7 +63,9 @@ class StaleTopicsRepairFlow(RepairsFlow):
             return self.async_show_form(
                 step_id="confirm",
                 data_schema=vol.Schema({}),
-                description_placeholders=dict(issue.translation_placeholders or {}) if issue else None,
+                description_placeholders=(
+                    dict(issue.translation_placeholders or {}) if issue else None
+                ),
             )
         # scanned again, something may have come online since the issue was raised
         stale = await async_find_stale_topics(self.hass)

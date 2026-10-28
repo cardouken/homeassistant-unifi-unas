@@ -20,7 +20,9 @@ SCANNED_KEY = f"{DOMAIN}_stale_topics_scanned"
 
 async def async_find_stale_topics(hass: HomeAssistant) -> dict[str, list[str]]:
     # retained topics of installs no config entry owns, as long as nothing there is online
-    configured = {get_mqtt_root(entry.entry_id) for entry in hass.config_entries.async_entries(DOMAIN)}
+    configured = {
+        get_mqtt_root(entry.entry_id) for entry in hass.config_entries.async_entries(DOMAIN)
+    }
     retained: dict[str, dict[str, str]] = defaultdict(dict)
 
     @callback
@@ -38,7 +40,8 @@ async def async_find_stale_topics(hass: HomeAssistant) -> dict[str, list[str]]:
     return {
         root: sorted(f"{root}/{topic}" for topic in topics)
         for root, topics in retained.items()
-        if root not in configured and "online" not in (topics.get("availability"), topics.get("fan/availability"))
+        if root not in configured
+        and "online" not in (topics.get("availability"), topics.get("fan/availability"))
     }
 
 

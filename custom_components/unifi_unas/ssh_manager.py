@@ -7,7 +7,6 @@ import logging
 import posixpath
 import shlex
 from pathlib import Path
-from typing import Optional
 
 import asyncssh
 
@@ -30,7 +29,8 @@ LEGACY_CLEANUP = (
     "|| pip3 uninstall -y paho-mqtt >/dev/null 2>&1; "
     "apt-get remove -y mosquitto-clients >/dev/null 2>&1; fi; "
     "rm -f /root/unas_monitor.py /root/fan_control.sh /root/fan_control.py /root/fan_control.json "
-    "/root/fan_control.tmp /tmp/fan_control_state /tmp/fan_control_state.lock /tmp/fan_control_last_pwm "
+    "/root/fan_control.tmp /tmp/fan_control_state /tmp/fan_control_state.lock "
+    "/tmp/fan_control_last_pwm "
     "/tmp/unas_hdd_temp /tmp/unas_hdd_temp.tmp /tmp/unas_monitor_interval "
     "/var/log/fan_control.log /var/log/fan_control.log.[1-9]"
 )
@@ -40,7 +40,9 @@ class NASCommandError(Exception):
     pass
 
 
-def outdated_files(files: dict[str, tuple[bytes, int]], remote_hashes: dict[str, str | None]) -> list[str]:
+def outdated_files(
+        files: dict[str, tuple[bytes, int]], remote_hashes: dict[str, str | None]
+) -> list[str]:
     return sorted(
         path for path, (content, _) in files.items()
         if remote_hashes.get(path) != hashlib.sha256(content).hexdigest()
@@ -53,7 +55,9 @@ def affected_services(paths: list[str]) -> list[str]:
         name = posixpath.basename(path)
         if path.startswith(f"{BUNDLE_DIR}/vendor/") or name in ("unas_common.py", "config.json"):
             return list(SERVICES)
-        affected.update(service for service in SERVICES if name in (f"{service}.py", f"{service}.service"))
+        affected.update(
+            service for service in SERVICES if name in (f"{service}.py", f"{service}.service")
+        )
     return [service for service in SERVICES if service in affected]
 
 
@@ -62,17 +66,17 @@ class SSHManager:
             self,
             host: str,
             username: str,
-            password: Optional[str] = None,
-            ssh_key: Optional[str] = None,
+            password: str | None = None,
+            ssh_key: str | None = None,
             port: int = 22,
-            mqtt_host: Optional[str] = None,
-            mqtt_user: Optional[str] = None,
-            mqtt_password: Optional[str] = None,
+            mqtt_host: str | None = None,
+            mqtt_user: str | None = None,
+            mqtt_password: str | None = None,
             mqtt_port: int = 1883,
             mqtt_tls: bool = False,
             mqtt_tls_insecure: bool = False,
             verify_host_key: bool = False,
-            pinned_host_key: Optional[str] = None,
+            pinned_host_key: str | None = None,
             connect_timeout: float = SSH_CONNECT_TIMEOUT,
     ) -> None:
         self.host = host
@@ -91,8 +95,8 @@ class SSHManager:
         self.connect_timeout = connect_timeout
         # Populated on connect with the server's host key in known_hosts form
         # ("host keytype base64"), for trust-on-first-use pinning by the caller.
-        self.server_host_key: Optional[str] = None
-        self._conn: Optional[asyncssh.SSHClientConnection] = None
+        self.server_host_key: str | None = None
+        self._conn: asyncssh.SSHClientConnection | None = None
         self._lock = asyncio.Lock()
         self._closed = False
 
@@ -209,7 +213,8 @@ class SSHManager:
         try:
             result = json.loads(stdout)
         except ValueError:
-            raise NASCommandError(f"status helper failed: {(stderr or stdout).strip()[-300:]}") from None
+            output = (stderr or stdout).strip()[-300:]
+            raise NASCommandError(f"status helper failed: {output}") from None
         if not isinstance(result, dict):
             raise NASCommandError("status helper returned no result")
         if "error" in result:
@@ -234,13 +239,14 @@ class SSHManager:
         await self._helper("set-schedule", task_id, "on" if enabled else "off")
 
     async def kick_native_fan_control(self) -> bool:
-        # uhwd (native fan daemon) calculates PID values but doesn't write them to sysfs until it receives an
-        # onFanProfileChanged event for some reason. Toggling the fan profile and back triggers this event, kicking uhwd
-        # into active control mode.
+        # uhwd (native fan daemon) calculates PID values but doesn't write them to sysfs until it
+        # receives an onFanProfileChanged event for some reason. Toggling the fan profile and back
+        # triggers this event, kicking uhwd into active control mode.
         # Uses internal ustd APIs — returns False gracefully if they change.
         #
-        # Mainly here to ensure that when fan control is given back to UNAS, it actually starts calculating new fan
-        # values. It seems like it doesn't always do this and gets stuck at whatever PWM it was set to earlier.
+        # Mainly here to ensure that when fan control is given back to UNAS, it actually starts
+        # calculating new fan values. It seems like it doesn't always do this and gets stuck at
+        # whatever PWM it was set to earlier.
         cmd = (
             "python3 -c '"
             "from ustd.tools.uhardware_fan import FanProfileManager; "
@@ -320,7 +326,9 @@ class SSHManager:
         if conn is None:
             raise ConnectionError("SSH connection not established")
         async with asyncio.timeout(DEPLOY_TIMEOUT), conn.start_sftp_client() as sftp:
-            await sftp.makedirs(BUNDLE_DIR, attrs=asyncssh.SFTPAttrs(permissions=0o700), exist_ok=True)
+            await sftp.makedirs(
+                BUNDLE_DIR, attrs=asyncssh.SFTPAttrs(permissions=0o700), exist_ok=True
+            )
             await sftp.chmod(BUNDLE_DIR, 0o700)
             for remote_path, (content, mode) in files.items():
                 await sftp.makedirs(posixpath.dirname(remote_path), exist_ok=True)

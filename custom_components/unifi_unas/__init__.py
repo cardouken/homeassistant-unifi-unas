@@ -13,23 +13,23 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
 
 from .const import (
-    DOMAIN,
+    CONF_DEVICE_MODEL,
     CONF_HOST,
-    CONF_USERNAME,
-    CONF_PASSWORD,
+    CONF_HOST_KEY,
     CONF_MQTT_HOST,
-    CONF_MQTT_USER,
     CONF_MQTT_PASSWORD,
     CONF_MQTT_PORT,
     CONF_MQTT_TLS,
     CONF_MQTT_TLS_INSECURE,
-    CONF_VERIFY_HOST_KEY,
-    CONF_HOST_KEY,
+    CONF_MQTT_USER,
+    CONF_PASSWORD,
     CONF_SCAN_INTERVAL,
-    CONF_DEVICE_MODEL,
-    DEFAULT_SCAN_INTERVAL,
+    CONF_USERNAME,
+    CONF_VERIFY_HOST_KEY,
     DEFAULT_DEVICE_MODEL,
     DEFAULT_MQTT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
     get_mqtt_root,
     get_mqtt_topics,
 )
@@ -37,8 +37,8 @@ from .coordinator import UNASDataCoordinator, UNASServiceCoordinator
 from .deploy import Deployer
 from .devices import DeviceSync, async_register_main_device
 from .reconcile import Reconciler
-from .stale_topics import async_schedule_scan
 from .ssh_manager import BUNDLE_DIR, LEGACY_CLEANUP, SSHManager
+from .stale_topics import async_schedule_scan
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -94,7 +94,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         new_data = {**entry.data}
         if CONF_DEVICE_MODEL not in new_data:
             new_data[CONF_DEVICE_MODEL] = DEFAULT_DEVICE_MODEL
-            _LOGGER.info("Migrated config entry to version 2, added device model: %s", DEFAULT_DEVICE_MODEL)
+            _LOGGER.info(
+                "Migrated config entry to version 2, added device model: %s", DEFAULT_DEVICE_MODEL
+            )
 
         hass.config_entries.async_update_entry(entry, data=new_data, version=2, minor_version=1)
 
@@ -136,7 +138,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool
     service = UNASServiceCoordinator(hass, entry, ssh)
     deployer = Deployer(hass, entry, ssh, service)
     reconciler = Reconciler(hass, entry, data, service)
-    entry.runtime_data = UNASRuntime(data, service, deployer, reconciler, ssh, connection_data(entry))
+    entry.runtime_data = UNASRuntime(
+        data, service, deployer, reconciler, ssh, connection_data(entry)
+    )
 
     await data.async_start()
 

@@ -1,5 +1,6 @@
 import json
 import sys
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -13,8 +14,6 @@ if str(ROOT / "custom_components") not in custom_components.__path__:
     custom_components.__path__.append(str(ROOT / "custom_components"))
 
 import pytest  # noqa: E402
-from datetime import timedelta  # noqa: E402
-
 from homeassistant.util import dt as dt_util  # noqa: E402
 from pytest_homeassistant_custom_component.common import (  # noqa: E402
     MockConfigEntry,
@@ -33,7 +32,9 @@ TASK = {
     "destinationDir": "bucket/x",
     "sourceDirs": ["/a"],
     "schedule": {"enable": True, "firstRunTime": "03:00", "weekdays": "*"},
-    "lastTaskRun": {"status": "idle", "startedAt": "2026-10-17T00:00:00Z", "finishedAt": "2026-10-17T00:10:00Z"},
+    "lastTaskRun": {
+        "status": "idle", "startedAt": "2026-10-17T00:00:00Z", "finishedAt": "2026-10-17T00:10:00Z"
+    },
     "nextBackup": "2026-10-19T00:00:00Z",
 }
 
@@ -169,12 +170,16 @@ def fire_monitor_cycle(hass, bays=("1", "2"), shares=("plex",), pools=("1",), in
             fire(hass, f"share/{share}/{key}", value)
     if inventory:
         fire(hass, "inventory", json.dumps({
-            "bays": list(bays), "nvme": [], "pools": [int(pool) for pool in pools], "shares": list(shares),
+            "bays": list(bays), "nvme": [], "pools": [int(pool) for pool in pools],
+            "shares": list(shares),
         } if inventory is True else inventory))
 
 
 def fire_fan_settings(hass, mode="target_temp"):
-    for key, value in {"mode": mode, "curve/min_temp": 40, "curve/max_temp": 50, "curve/min_fan": 51,
-                       "curve/max_fan": 255, "curve/target_temp": 43, "curve/temp_metric": "avg",
-                       "curve/response_speed": "balanced"}.items():
+    settings = {
+        "mode": mode, "curve/min_temp": 40, "curve/max_temp": 50, "curve/min_fan": 51,
+        "curve/max_fan": 255, "curve/target_temp": 43, "curve/temp_metric": "avg",
+        "curve/response_speed": "balanced",
+    }
+    for key, value in settings.items():
         fire(hass, f"control/fan/{key}", value)

@@ -16,7 +16,9 @@ from .entity import UNASEntity
 PARALLEL_UPDATES = 1
 
 REINSTALL = ButtonEntityDescription(
-    key="reinstall_scripts", translation_key="reinstall_scripts", entity_category=EntityCategory.CONFIG
+    key="reinstall_scripts",
+    translation_key="reinstall_scripts",
+    entity_category=EntityCategory.CONFIG,
 )
 REBOOT = ButtonEntityDescription(key="reboot", translation_key="reboot")
 SHUTDOWN = ButtonEntityDescription(key="shutdown", translation_key="shutdown")
@@ -39,7 +41,8 @@ async def async_setup_entry(
     @callback
     def add_backups(task_ids: list[str]) -> None:
         async_add_entities(
-            UNASBackupTriggerButton(coordinator, coordinator.find_backup_task(task_id)) for task_id in task_ids
+            UNASBackupTriggerButton(coordinator, coordinator.find_backup_task(task_id))
+            for task_id in task_ids
         )
 
     entry.runtime_data.reconciler.register("backups", add_backups)
@@ -63,7 +66,10 @@ class UNASReinstallScriptsButton(UNASButton):
 
 
 class UNASCommandButton(UNASButton):
-    def __init__(self, coordinator: UNASServiceCoordinator, description: ButtonEntityDescription, command: str) -> None:
+    def __init__(
+            self, coordinator: UNASServiceCoordinator, description: ButtonEntityDescription,
+            command: str,
+    ) -> None:
         super().__init__(coordinator, description.key, description)
         self._command = command
 
@@ -88,6 +94,8 @@ class UNASBackupTriggerButton(UNASButton):
             await self.coordinator.ssh_manager.run_backup(self._task_id)
         except Exception as err:
             raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="backup_failed", translation_placeholders={"error": str(err)}
+                translation_domain=DOMAIN,
+                translation_key="backup_failed",
+                translation_placeholders={"error": str(err)},
             ) from err
         await self.coordinator.async_request_refresh()

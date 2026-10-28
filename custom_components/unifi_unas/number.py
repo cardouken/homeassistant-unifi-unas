@@ -16,8 +16,9 @@ PARALLEL_UPDATES = 1
 
 FAN_CURVE_PARAMS = tuple(
     NumberEntityDescription(
-        key=key, translation_key=f"curve_{key}", native_min_value=low, native_max_value=high, native_step=1,
-        native_unit_of_measurement=unit, mode=NumberMode.BOX, entity_category=EntityCategory.CONFIG,
+        key=key, translation_key=f"curve_{key}", native_min_value=low, native_max_value=high,
+        native_step=1, native_unit_of_measurement=unit, mode=NumberMode.BOX,
+        entity_category=EntityCategory.CONFIG,
     )
     for key, low, high, unit in (
         ("min_temp", 20, 50, "°C"),
@@ -28,10 +29,11 @@ FAN_CURVE_PARAMS = tuple(
     )
 )
 FAN_SPEED = NumberEntityDescription(
-    key="fan_speed", translation_key="fan_speed", native_min_value=0, native_max_value=100, native_step=1,
-    native_unit_of_measurement="%", mode=NumberMode.SLIDER,
+    key="fan_speed", translation_key="fan_speed", native_min_value=0, native_max_value=100,
+    native_step=1, native_unit_of_measurement="%", mode=NumberMode.SLIDER,
 )
 FAN_PARAMS = ("min_fan", "max_fan")
+CURVE_ORDER = (("min_temp", "max_temp", "temperature_order"), ("min_fan", "max_fan", "fan_order"))
 # which fan modes each curve parameter applies to
 CURVE_MODES = {
     "min_temp": ("auto",),
@@ -89,12 +91,16 @@ class UNASFanSpeedNumber(UNASFanNumber):
 
     async def async_set_native_value(self, value: float) -> None:
         if self.fan.mode != "set_speed":
-            raise ServiceValidationError(translation_domain=DOMAIN, translation_key="set_speed_only")
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="set_speed_only"
+            )
         await async_publish_setting(self.coordinator, "speed", percent_to_pwm(value))
 
 
 class UNASFanCurveNumber(UNASFanNumber):
-    def __init__(self, coordinator: UNASDataCoordinator, description: NumberEntityDescription) -> None:
+    def __init__(
+            self, coordinator: UNASDataCoordinator, description: NumberEntityDescription
+    ) -> None:
         super().__init__(coordinator, f"fan_curve_{description.key}", description)
         self._key = description.key
 
@@ -124,13 +130,16 @@ class UNASFanCurveNumber(UNASFanNumber):
         fan = self.fan
         curve = {key: self._value(fan, key) for key in CURVE_MODES}
         curve[self._key] = value
-        for low, high, error in (("min_temp", "max_temp", "temperature_order"), ("min_fan", "max_fan", "fan_order")):
-            if self._key in (low, high) and None not in (curve[low], curve[high]) and curve[high] <= curve[low]:
+        for low, high, error in CURVE_ORDER:
+            if self._key not in (low, high) or None in (curve[low], curve[high]):
+                continue
+            if curve[high] <= curve[low]:
                 raise ServiceValidationError(
                     translation_domain=DOMAIN,
                     translation_key=error,
                     translation_placeholders={"min": str(curve[low]), "max": str(curve[high])},
                 )
         await async_publish_setting(
-            self.coordinator, f"curve/{self._key}", percent_to_pwm(value) if self._key in FAN_PARAMS else value
+            self.coordinator, f"curve/{self._key}",
+            percent_to_pwm(value) if self._key in FAN_PARAMS else value,
         )

@@ -10,7 +10,16 @@ from homeassistant.helpers import issue_registry as ir
 from homeassistant.setup import async_setup_component
 from pytest_homeassistant_custom_component.common import async_fire_time_changed
 
-from conftest import DOMAIN, ENTRY_ID, TASK, fire, fire_fan_settings, fire_monitor_cycle, settle, setup_entry
+from conftest import (
+    DOMAIN,
+    ENTRY_ID,
+    TASK,
+    fire,
+    fire_fan_settings,
+    fire_monitor_cycle,
+    settle,
+    setup_entry,
+)
 
 OUTDATED = ["/root/unifi_unas/fan_control.py"]
 
@@ -147,7 +156,9 @@ async def test_reinstall_runs_in_the_background(hass, mqtt_mock, ssh):
     entry = await setup_entry(hass)
     fake = ssh.instances[0]
     fake.deploy_gate = asyncio.Event()
-    button = er.async_get(hass).async_get_entity_id("button", DOMAIN, f"{ENTRY_ID}_reinstall_scripts")
+    button = er.async_get(hass).async_get_entity_id(
+        "button", DOMAIN, f"{ENTRY_ID}_reinstall_scripts"
+    )
 
     await hass.services.async_call("button", "press", {"entity_id": button}, blocking=True)
     assert fake.deploys == [None]
@@ -180,7 +191,9 @@ async def test_unlimited_share_quota_has_no_unit(hass, mqtt_mock, ssh):
     await setup_entry(hass)
     fire_monitor_cycle(hass)
     await settle(hass)
-    entity_id = er.async_get(hass).async_get_entity_id("sensor", DOMAIN, f"{ENTRY_ID}_unas_share_plex_quota")
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "sensor", DOMAIN, f"{ENTRY_ID}_unas_share_plex_quota"
+    )
     quota = hass.states.get(entity_id)
     assert quota.state == "Unlimited"
     assert "unit_of_measurement" not in quota.attributes

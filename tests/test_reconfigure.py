@@ -16,14 +16,19 @@ async def reconfigure(hass, entry, identity=NAS, mqtt_error=None, **changes):
         patch(f"{FLOW}.probe_mqtt", return_value=mqtt_error) as mqtt_probe,
     ):
         result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id}
+            DOMAIN, context={
+                "source": config_entries.SOURCE_RECONFIGURE, "entry_id": entry.entry_id
+            }
         )
         form = result
         fields = {
-            "host": entry.data["host"], "username": entry.data["username"], "mqtt_host": entry.data["mqtt_host"],
-            "mqtt_user": entry.data["mqtt_user"], "mqtt_tls": False, "device_name": "UNAS", "verify_host_key": True,
+            "host": entry.data["host"], "username": entry.data["username"],
+            "mqtt_host": entry.data["mqtt_host"], "mqtt_user": entry.data["mqtt_user"],
+            "mqtt_tls": False, "device_name": "UNAS", "verify_host_key": True,
         }
-        result = await hass.config_entries.flow.async_configure(result["flow_id"], {**fields, **changes})
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {**fields, **changes}
+        )
         await hass.async_block_till_done()
     return form, result, probe, mqtt_probe
 
@@ -44,7 +49,9 @@ async def test_passwords_never_reach_the_form(hass, entry):
 async def test_blank_passwords_keep_the_stored_ones_and_the_pin(hass, entry):
     _, result, probe, mqtt_probe = await reconfigure(hass, entry, device_name="LIL NAS X")
     assert result["reason"] == "reconfigure_successful"
-    assert (entry.data["password"], entry.data["mqtt_password"], entry.data["host_key"]) == ("sshpass", "x", PIN)
+    assert (entry.data["password"], entry.data["mqtt_password"], entry.data["host_key"]) == (
+        "sshpass", "x", PIN
+    )
     assert probe.call_args.args == ("192.168.1.25", "root", "sshpass")
     assert mqtt_probe.call_args.args[3] == "x"
     assert entry.title == "LIL NAS X (192.168.1.25)"
@@ -59,7 +66,9 @@ async def test_a_new_address_for_the_same_nas_pins_again(hass, entry):
 
 
 async def test_a_different_nas_is_refused(hass, entry):
-    _, result, *_ = await reconfigure(hass, entry, identity={"serial": "aabbccddeeff"}, host="192.168.1.30")
+    _, result, *_ = await reconfigure(
+        hass, entry, identity={"serial": "aabbccddeeff"}, host="192.168.1.30"
+    )
     assert result["reason"] == "wrong_device"
     assert entry.data["host"] == "192.168.1.25"
 

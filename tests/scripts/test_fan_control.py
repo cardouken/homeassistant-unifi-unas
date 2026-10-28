@@ -88,7 +88,9 @@ def test_no_data_holds_then_ramps_to_full():
     assert failsafe.apply(1010, "target_temp", [], "no_data", None, 80) == (80, None)
     pwm, fault = failsafe.apply(1035, "target_temp", [], "no_data", None, 80)
     assert 80 < pwm < 255 and fault == "no_temperature_data"
-    assert failsafe.apply(1060, "target_temp", [], "no_data", None, 80) == (255, "no_temperature_data")
+    assert failsafe.apply(1060, "target_temp", [], "no_data", None, 80) == (
+        255, "no_temperature_data"
+    )
     assert failsafe.apply(1061, "target_temp", [43], "write", 70, 255) == (70, None)
 
 
@@ -111,7 +113,9 @@ def test_no_data_at_startup_holds_current_pwm():
     assert failsafe.apply(1070, "auto", [], "no_data", None, 120) == (255, "no_temperature_data")
 
 
-@pytest.mark.parametrize("mode,action", [("target_temp", "write"), ("auto", "write"), ("128", "write")])
+@pytest.mark.parametrize(
+    "mode,action", [("target_temp", "write"), ("auto", "write"), ("128", "write")]
+)
 def test_overheat_forces_full_speed_with_hysteresis(mode, action):
     failsafe = fc.FailSafe(started=1000)
     assert failsafe.apply(1000, mode, [61, 40], action, 128, 128) == (128, None)
@@ -147,7 +151,8 @@ def test_settings_file_from_before_the_speed_topic(tmp_path, monkeypatch):
 
 
 def test_set_speed_reaches_the_controller_as_before():
-    assert fc.controller_settings(dict(fc.DEFAULT_SETTINGS, mode="set_speed", speed=90))["mode"] == "90"
+    settings = dict(fc.DEFAULT_SETTINGS, mode="set_speed", speed=90)
+    assert fc.controller_settings(settings)["mode"] == "90"
     assert fc.controller_settings(fc.DEFAULT_SETTINGS)["mode"] == "unas_managed"
 
 

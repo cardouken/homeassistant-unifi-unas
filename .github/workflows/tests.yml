@@ -5,6 +5,14 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: "ubuntu-latest"
+    steps:
+      - uses: "actions/checkout@v4"
+      - uses: "astral-sh/setup-uv@v6"
+      - name: Ruff
+        run: uvx ruff@0.14.0 check custom_components tests
+
   scripts:
     runs-on: "ubuntu-latest"
     strategy:

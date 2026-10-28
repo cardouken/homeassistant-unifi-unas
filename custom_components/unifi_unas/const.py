@@ -54,7 +54,8 @@ DEVICE_MODELS = {
     "UNVR_PRO": "UNVR Pro",
 }
 
-# hardware sysid from /api/system, as in UniFi's own uidb.json; the Gen 2 UNVRs are not known to work yet
+# hardware sysid from /api/system, as in UniFi's own uidb.json;
+# the Gen 2 UNVRs are not known to work yet
 SYSID_MODELS = {
     "ea51": "UNAS_PRO",
     "ea63": "UNAS_PRO_8",

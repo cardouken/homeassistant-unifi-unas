@@ -9,7 +9,11 @@ from typing import Any
 
 import asyncssh
 import voluptuous as vol
+from homeassistant import config_entries
+from homeassistant.components import mqtt
+from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
+from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -20,32 +24,27 @@ from homeassistant.helpers.selector import (
     SelectSelectorMode,
 )
 
-from homeassistant import config_entries
-from homeassistant.components import mqtt
-from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
-from homeassistant.data_entry_flow import FlowResult
-
 from .const import (
-    DOMAIN,
-    DEFAULT_USERNAME,
-    DEFAULT_SCAN_INTERVAL,
-    DEFAULT_DEVICE_MODEL,
-    DEFAULT_MQTT_PORT,
-    DEFAULT_MQTT_TLS_PORT,
-    MIN_SCAN_INTERVAL,
-    MAX_SCAN_INTERVAL,
+    CONF_DEVICE_MODEL,
+    CONF_DEVICE_NAME,
+    CONF_HOST_KEY,
     CONF_MQTT_HOST,
-    CONF_MQTT_USER,
     CONF_MQTT_PASSWORD,
     CONF_MQTT_PORT,
     CONF_MQTT_TLS,
     CONF_MQTT_TLS_INSECURE,
-    CONF_VERIFY_HOST_KEY,
-    CONF_HOST_KEY,
+    CONF_MQTT_USER,
     CONF_SCAN_INTERVAL,
-    CONF_DEVICE_MODEL,
-    CONF_DEVICE_NAME,
+    CONF_VERIFY_HOST_KEY,
+    DEFAULT_DEVICE_MODEL,
+    DEFAULT_MQTT_PORT,
+    DEFAULT_MQTT_TLS_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DEFAULT_USERNAME,
     DEVICE_MODELS,
+    DOMAIN,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
     SYSID_MODELS,
 )
 from .ssh_manager import NASCommandError, SSHManager
@@ -100,9 +99,14 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             # the form never sends passwords back, a blank one keeps what is stored
             data = {
                 **entry.data,
-                **{key: value for key, value in user_input.items() if value or key not in SECRET_FIELDS},
+                **{
+                    key: value for key, value in user_input.items()
+                    if value or key not in SECRET_FIELDS
+                },
             }
-            error_key, identity = await self._probe_ssh(data[CONF_HOST], data[CONF_USERNAME], data.get(CONF_PASSWORD))
+            error_key, identity = await self._probe_ssh(
+                data[CONF_HOST], data[CONF_USERNAME], data.get(CONF_PASSWORD)
+            )
             serial = ((identity or {}).get("serial") or "").lower()
             if error_key:
                 errors["base"] = error_key
@@ -130,13 +134,19 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         reconfigure_schema = vol.Schema(
             {
                 vol.Required(CONF_HOST, default=entry.data[CONF_HOST]): str,
-                vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, DEFAULT_USERNAME)): str,
+                vol.Required(
+                    CONF_USERNAME, default=entry.data.get(CONF_USERNAME, DEFAULT_USERNAME)
+                ): str,
                 vol.Optional(CONF_PASSWORD): str,
                 vol.Required(CONF_MQTT_HOST, default=entry.data[CONF_MQTT_HOST]): str,
                 vol.Required(CONF_MQTT_USER, default=entry.data[CONF_MQTT_USER]): str,
                 vol.Optional(CONF_MQTT_PASSWORD): str,
-                vol.Optional(CONF_MQTT_TLS, default=entry.data.get(CONF_MQTT_TLS, False)): BooleanSelector(),
-                vol.Optional(CONF_DEVICE_NAME, default=entry.data.get(CONF_DEVICE_NAME) or "UNAS"): str,
+                vol.Optional(
+                    CONF_MQTT_TLS, default=entry.data.get(CONF_MQTT_TLS, False)
+                ): BooleanSelector(),
+                vol.Optional(
+                    CONF_DEVICE_NAME, default=entry.data.get(CONF_DEVICE_NAME) or "UNAS"
+                ): str,
                 vol.Optional(
                     CONF_VERIFY_HOST_KEY,
                     default=entry.data.get(CONF_VERIFY_HOST_KEY, False),
@@ -223,9 +233,13 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._pending_input[CONF_DEVICE_MODEL] = model
                 return await self._async_step_mqtt()
 
-        return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors)
+        return self.async_show_form(
+            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        )
 
-    async def async_step_unrecognized_device(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_unrecognized_device(
+            self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         # installing onto some other UniFi console would leave two publishers on one topic, see #25
         if user_input is not None:
             self._pending_input[CONF_DEVICE_MODEL] = user_input[CONF_DEVICE_MODEL]
@@ -233,7 +247,9 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         identity = self._identity or {}
         return self.async_show_form(
             step_id="unrecognized_device",
-            data_schema=vol.Schema({vol.Required(CONF_DEVICE_MODEL, default=DEFAULT_DEVICE_MODEL): MODEL_SELECTOR}),
+            data_schema=vol.Schema(
+                {vol.Required(CONF_DEVICE_MODEL, default=DEFAULT_DEVICE_MODEL): MODEL_SELECTOR}
+            ),
             description_placeholders={
                 "host": self._pending_input[CONF_HOST],
                 "device": identity.get("product") or identity.get("name") or "an unknown device",
@@ -281,12 +297,16 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
         return await self.async_step_reauth_confirm()
 
-    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+    async def async_step_reauth_confirm(
+            self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
         errors: dict[str, str] = {}
         entry = self._get_reauth_entry()
         if user_input is not None:
             password = user_input.get(CONF_PASSWORD) or ""
-            error_key, identity = await self._probe_ssh(entry.data[CONF_HOST], user_input[CONF_USERNAME], password)
+            error_key, identity = await self._probe_ssh(
+                entry.data[CONF_HOST], user_input[CONF_USERNAME], password
+            )
             serial = ((identity or {}).get("serial") or "").lower()
             if error_key:
                 errors["base"] = error_key
@@ -303,7 +323,9 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="reauth_confirm",
             data_schema=vol.Schema({
-                vol.Required(CONF_USERNAME, default=entry.data.get(CONF_USERNAME, DEFAULT_USERNAME)): str,
+                vol.Required(
+                    CONF_USERNAME, default=entry.data.get(CONF_USERNAME, DEFAULT_USERNAME)
+                ): str,
                 vol.Optional(CONF_PASSWORD): str,
             }),
             errors=errors,
@@ -313,9 +335,13 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def _create_entry(self, user_input: dict[str, Any]) -> FlowResult:
         data = {key: value for key, value in user_input.items() if key != CONF_SCAN_INTERVAL}
         interval = int(user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
-        device_name = user_input.get(CONF_DEVICE_NAME) or DEVICE_MODELS[user_input[CONF_DEVICE_MODEL]]
+        device_name = (
+            user_input.get(CONF_DEVICE_NAME) or DEVICE_MODELS[user_input[CONF_DEVICE_MODEL]]
+        )
         return self.async_create_entry(
-            title=f"{device_name} ({user_input[CONF_HOST]})", data=data, options={CONF_SCAN_INTERVAL: interval}
+            title=f"{device_name} ({user_input[CONF_HOST]})",
+            data=data,
+            options={CONF_SCAN_INTERVAL: interval},
         )
 
     async def _probe_ssh(
@@ -404,7 +430,9 @@ class UNASProOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
             # applied by the update listener, no reload
-            return self.async_create_entry(data={CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL])})
+            return self.async_create_entry(
+                data={CONF_SCAN_INTERVAL: int(user_input[CONF_SCAN_INTERVAL])}
+            )
 
         options_schema = vol.Schema(
             {
@@ -412,7 +440,10 @@ class UNASProOptionsFlow(config_entries.OptionsFlow):
                     CONF_SCAN_INTERVAL,
                     default=self.config_entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
                 ): NumberSelector(
-                    NumberSelectorConfig(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX)),
+                    NumberSelectorConfig(
+                        min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL, mode=NumberSelectorMode.BOX
+                    )
+                ),
             }
         )
 

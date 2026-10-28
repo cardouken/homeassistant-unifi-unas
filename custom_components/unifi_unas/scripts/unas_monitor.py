@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
-import time
-import subprocess
-import logging
-import json
 import http.client
+import json
+import logging
 import re
+import subprocess
+import time
 from pathlib import Path
 
 from unas_common import connect, load_config, mqtt_client
@@ -211,7 +211,7 @@ class UNASMonitor:
 
     def publish_nvme(self, slot, metric, value):
         self._publish(f"{MQTT_NVME}/{slot}/{metric}", value)
-    
+
     def publish_pool(self, pool_num, metric, value):
         self._publish(f"{MQTT_POOL}/{pool_num}/{metric}", value)
 
@@ -463,7 +463,9 @@ class UNASMonitor:
 
     def run_cmd(self, cmd, timeout=10):
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, shell=isinstance(cmd, str))
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout, shell=isinstance(cmd, str)
+            )
             return result.stdout
         except (subprocess.SubprocessError, OSError):
             return ""
@@ -487,14 +489,21 @@ class UNASMonitor:
         except OSError:
             pass
         if DEVICE_MODEL.startswith("UNVR"):
-            data['protect_version'] = self.run_cmd(['dpkg-query', '-W', '-f=${Version}', 'unifi-protect']).strip()
+            data['protect_version'] = self.run_cmd(
+                ['dpkg-query', '-W', '-f=${Version}', 'unifi-protect']
+            ).strip()
         else:
-            data['drive_version'] = self.run_cmd(['dpkg-query', '-W', '-f=${Version}', 'unifi-drive']).strip()
+            data['drive_version'] = self.run_cmd(
+                ['dpkg-query', '-W', '-f=${Version}', 'unifi-drive']
+            ).strip()
         data['cpu_usage'] = self.get_cpu_usage()
         data['disk_read'], data['disk_write'] = self.get_disk_throughput()
 
         with open('/proc/meminfo') as f:
-            meminfo = {parts[0].rstrip(':'): int(parts[1]) for line in f if len(parts := line.split()) >= 2}
+            meminfo = {
+                parts[0].rstrip(':'): int(parts[1])
+                for line in f if len(parts := line.split()) >= 2
+            }
 
         mem_total = meminfo.get('MemTotal', 0) // 1024
         mem_avail = meminfo.get('MemAvailable', 0) // 1024

@@ -14,7 +14,8 @@ CONFIG = "/root/unifi_unas/config.json"
 
 def manager():
     return SSHManager(
-        "192.0.2.1", "root", mqtt_host="192.0.2.2", mqtt_user="unas", mqtt_password='p"$x\\', mqtt_port=1883
+        "192.0.2.1", "root", mqtt_host="192.0.2.2", mqtt_user="unas", mqtt_password='p"$x\\',
+        mqtt_port=1883,
     )
 
 
@@ -93,7 +94,9 @@ def test_missing_file_is_outdated(deployed):
 
 def test_other_config_is_outdated(deployed):
     mgr, _ = deployed
-    assert asyncio.run(mgr.bundle_status("UNAS_PRO", "unas/other"))[1] == [f"{ssh_manager.BUNDLE_DIR}/config.json"]
+    assert asyncio.run(mgr.bundle_status("UNAS_PRO", "unas/other"))[1] == [
+        f"{ssh_manager.BUNDLE_DIR}/config.json"
+    ]
 
 
 def test_failed_backup_api_is_unknown_not_empty(deployed):

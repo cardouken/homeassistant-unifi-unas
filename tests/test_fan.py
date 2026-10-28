@@ -2,7 +2,16 @@ import pytest
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 
-from conftest import DOMAIN, ENTRY_ID, ROOT_TOPIC, fire, fire_fan_settings, fire_monitor_cycle, settle, setup_entry
+from conftest import (
+    DOMAIN,
+    ENTRY_ID,
+    ROOT_TOPIC,
+    fire,
+    fire_fan_settings,
+    fire_monitor_cycle,
+    settle,
+    setup_entry,
+)
 
 
 def entity_id(hass, platform, key):
@@ -56,7 +65,9 @@ async def test_a_legacy_numeric_mode_is_set_speed(hass, fan):
 
 async def test_set_speed_starts_from_the_current_speed(hass, fan):
     await hass.services.async_call(
-        "select", "select_option", {"entity_id": entity_id(hass, "select", "fan_mode"), "option": "Set Speed"},
+        "select", "select_option", {
+            "entity_id": entity_id(hass, "select", "fan_mode"), "option": "Set Speed"
+        },
         blocking=True,
     )
     assert published(fan) == [("speed", "76"), ("mode", "set_speed")]
@@ -65,7 +76,9 @@ async def test_set_speed_starts_from_the_current_speed(hass, fan):
 
     fan.async_publish.reset_mock()
     await hass.services.async_call(
-        "number", "set_value", {"entity_id": entity_id(hass, "number", "fan_speed_control"), "value": 50},
+        "number", "set_value", {
+            "entity_id": entity_id(hass, "number", "fan_speed_control"), "value": 50
+        },
         blocking=True,
     )
     assert published(fan) == [("speed", "128")]
@@ -76,7 +89,9 @@ async def test_set_speed_starts_from_the_current_speed(hass, fan):
 async def test_fan_speed_outside_set_speed_is_rejected(hass, fan):
     with pytest.raises(ServiceValidationError) as err:
         await hass.services.async_call(
-            "number", "set_value", {"entity_id": entity_id(hass, "number", "fan_speed_control"), "value": 50},
+            "number", "set_value", {
+                "entity_id": entity_id(hass, "number", "fan_speed_control"), "value": 50
+            },
             blocking=True,
         )
     assert err.value.translation_key == "set_speed_only"
@@ -88,14 +103,18 @@ async def test_an_inverted_curve_is_rejected(hass, fan):
     await settle(hass)
     with pytest.raises(ServiceValidationError) as err:
         await hass.services.async_call(
-            "number", "set_value", {"entity_id": entity_id(hass, "number", "fan_curve_min_temp"), "value": 50},
+            "number", "set_value", {
+                "entity_id": entity_id(hass, "number", "fan_curve_min_temp"), "value": 50
+            },
             blocking=True,
         )
     assert (err.value.translation_key, err.value.translation_placeholders) == (
         "temperature_order", {"min": "50", "max": "50"}
     )
     await hass.services.async_call(
-        "number", "set_value", {"entity_id": entity_id(hass, "number", "fan_curve_min_fan"), "value": 40},
+        "number", "set_value", {
+            "entity_id": entity_id(hass, "number", "fan_curve_min_fan"), "value": 40
+        },
         blocking=True,
     )
     assert published(fan) == [("curve/min_fan", "102")]
@@ -111,7 +130,8 @@ async def test_the_daemon_going_offline_takes_the_controls_with_it(hass, fan):
 async def test_fan_curve_sensor(hass, fan):
     curve = state(hass, "sensor", "fan_curve_viz")
     assert curve.state == "40-50°C → 20-100%"
-    assert curve.attributes["curve_points"][0] == [30, 20] and curve.attributes["curve_points"][-1] == [60, 100]
+    points = curve.attributes["curve_points"]
+    assert points[0] == [30, 20] and points[-1] == [60, 100]
     fire(hass, "control/fan/curve/max_temp", "40")
     await settle(hass)
     assert state(hass, "sensor", "fan_curve_viz").attributes["curve_points"][15] == [45, 100]

@@ -209,7 +209,9 @@ class Controller:
 
             if self.saved_integral is not None and now - self.saved_time < RESTORE_WINDOW:
                 self.integral = self.saved_integral
-                logger.info("Restored saved integral %s after %ss", self.integral, now - self.saved_time)
+                logger.info(
+                    "Restored saved integral %s after %ss", self.integral, now - self.saved_time
+                )
             elif calculated > 0:
                 self.integral = float(calculated)
             self.saved_integral = None
@@ -502,7 +504,9 @@ class FanService:
 
     def _publish_missing_settings(self):
         with self.lock:
-            missing = {key: self.settings[key] for key in DEFAULT_SETTINGS if key not in self.received}
+            missing = {
+                key: self.settings[key] for key in DEFAULT_SETTINGS if key not in self.received
+            }
         for topic, key in SETTING_TOPICS.items():
             if key in missing:
                 self.client.publish(f"{MQTT_FAN_CONTROL}/{topic}", str(missing[key]), retain=True)
@@ -544,7 +548,8 @@ class FanService:
                 line = f"{mode}: drives [{temps_text}]°C -> {pwm} PWM ({pwm * 100 // 255}%)"
                 if mode == "target_temp" and temps:
                     line += (
-                        f", {metric_value(temps, settings['temp_metric'])}°C {settings['temp_metric']}"
+                        f", {metric_value(temps, settings['temp_metric'])}°C"
+                        f" {settings['temp_metric']}"
                         f" vs {settings['target_temp']}°C target, I:{self.controller.integral}"
                         f" T:{self.controller.trend_mult}"
                     )
@@ -575,7 +580,8 @@ class FanService:
     def run(self):
         signal.signal(signal.SIGTERM, lambda *_: self.stop.set())
         signal.signal(signal.SIGINT, lambda *_: self.stop.set())
-        logger.info("Fan control starting, PWM channels: %s", ", ".join(c.name for c in self.channels) or "none")
+        channels = ", ".join(c.name for c in self.channels) or "none"
+        logger.info("Fan control starting, PWM channels: %s", channels)
         self.client.loop_start()
         connect(self.client, CONFIG)
         self._wait_for_retained()
@@ -595,7 +601,9 @@ class FanService:
                     self.settings["mode"] = settings["mode"]
                     save_settings(self.settings)
 
-            pwm, fault = self.failsafe.apply(now, settings["mode"], self.temps, action, pwm, self.held_pwm)
+            pwm, fault = self.failsafe.apply(
+                now, settings["mode"], self.temps, action, pwm, self.held_pwm
+            )
             if pwm is not None:
                 self._write_pwm(pwm)
                 self.held_pwm = pwm
@@ -603,7 +611,8 @@ class FanService:
                     self.controller.last_pwm = pwm
             else:
                 self.held_pwm = read_hw_pwm()
-            self._report(now, settings, self.temps, action, pwm if pwm is not None else self.held_pwm, fault)
+            reported = pwm if pwm is not None else self.held_pwm
+            self._report(now, settings, self.temps, action, reported, fault)
             self._hold_pwm(pwm)
 
         logger.info("Fan control stopping")

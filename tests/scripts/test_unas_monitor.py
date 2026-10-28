@@ -22,10 +22,13 @@ def monitor(monkeypatch):
     mon.mqtt = FakeMQTT()
     monkeypatch.setattr(mon, "get_system_metrics", lambda: {"fan_speed": 80, "cpu_temp": 50})
     monkeypatch.setattr(mon, "get_device_info", lambda: {"shortname": "UNASPRO", "sysid": "ea51"})
-    monkeypatch.setattr(mon, "get_drives", lambda: [{"bay": "2", "temperature": 41}, {"bay": "10", "temperature": 40}])
+    drives = [{"bay": "2", "temperature": 41}, {"bay": "10", "temperature": 40}]
+    monkeypatch.setattr(mon, "get_drives", lambda: drives)
     monkeypatch.setattr(mon, "get_nvme_drives", lambda: [])
     monkeypatch.setattr(mon, "get_pools_from_api", lambda: [{"pool": 1, "usage": 52}])
-    monkeypatch.setattr(mon, "get_smb_data", lambda: [{"username": "a", "ip": "1.2.3.4", "share": "x"}])
+    monkeypatch.setattr(
+        mon, "get_smb_data", lambda: [{"username": "a", "ip": "1.2.3.4", "share": "x"}]
+    )
     monkeypatch.setattr(mon, "get_nfs_mounts", lambda: [])
     monkeypatch.setattr(mon, "get_shares", lambda: [{"name": "plex", "usage": 1.5}])
     monkeypatch.setattr(mon, "_get_storage", lambda: STORAGE)
@@ -118,16 +121,21 @@ SYSTEM = {"hardware": {
 
 def test_device_info_from_the_system_api(tmp_path, monkeypatch):
     calls = []
-    monkeypatch.setattr(um.http.client, "HTTPConnection", fake_connection(body=json_body(SYSTEM), calls=calls))
+    monkeypatch.setattr(
+        um.http.client, "HTTPConnection", fake_connection(body=json_body(SYSTEM), calls=calls)
+    )
     table = tmp_path / "uidb.json"
-    table.write_text(json.dumps({"devices": [{"sysid": "ea51", "sku": "UNAS-Pro", "product": {"abbrev": "UNAS Pro"}}]}))
+    table.write_text(json.dumps({
+        "devices": [{"sysid": "ea51", "sku": "UNAS-Pro", "product": {"abbrev": "UNAS Pro"}}]
+    }))
     monkeypatch.setattr(um, "UIDB_FILE", table)
     mon = um.UNASMonitor(mqtt_enabled=False)
     info = mon.get_device_info()
     assert info == {
         "name": "UniFi Network Attached Storage Pro", "shortname": "UNASPRO", "sysid": "ea51",
         "product": "UNAS Pro", "sku": "UNAS-Pro",
-        "serial": "0cea14c0c079", "mac": "0CEA14C0C079", "hw_revision": 960263, "firmware": "6.0.11",
+        "serial": "0cea14c0c079", "mac": "0CEA14C0C079", "hw_revision": 960263,
+        "firmware": "6.0.11",
     }
     assert mon.get_device_info() == info
     assert calls == [("127.0.0.1", 11081)]
@@ -147,7 +155,9 @@ def interval_message(payload):
     return SimpleNamespace(topic=um.MONITOR_INTERVAL_TOPIC, payload=payload.encode())
 
 
-@pytest.mark.parametrize("payload,expected", [("10", 10), ("10.0", 10), ("4", 30), ("61", 30), ("x", 30)])
+@pytest.mark.parametrize(
+    "payload,expected", [("10", 10), ("10.0", 10), ("4", 30), ("61", 30), ("x", 30)]
+)
 def test_monitor_interval(monitor, payload, expected):
     monitor.monitor_interval = 30
     monitor._on_message(None, None, interval_message(payload))
@@ -164,7 +174,8 @@ def test_unchanged_interval_is_not_logged(monitor, caplog):
 def test_product_name_comes_from_the_unifi_device_table(tmp_path, monkeypatch):
     table = tmp_path / "uidb.json"
     table.write_text(json.dumps({"devices": [
-        {"sysid": "ea63", "sku": "UNAS-Pro-8", "product": {"abbrev": "UNAS Pro 8", "name": "UNAS Pro 8"}},
+        {"sysid": "ea63", "sku": "UNAS-Pro-8",
+         "product": {"abbrev": "UNAS Pro 8", "name": "UNAS Pro 8"}},
         {"sysid": "ea51", "sku": "UNAS-Pro", "product": {"abbrev": "UNAS Pro", "name": "UNAS Pro"}},
     ]}))
     monkeypatch.setattr(um, "UIDB_FILE", table)

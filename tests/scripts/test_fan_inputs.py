@@ -52,7 +52,8 @@ def test_read_temps_falls_back_to_smartctl(monkeypatch):
 ])
 def test_hand_back_only_on_an_explicit_stop(monkeypatch, jobs, expected):
     monkeypatch.setattr(
-        fc.subprocess, "run", lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=jobs)
+        fc.subprocess, "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, stdout=jobs),
     )
     assert fc.stopping_for_good() is expected
 

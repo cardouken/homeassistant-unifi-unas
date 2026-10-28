@@ -27,17 +27,20 @@ TO_REDACT = {
     "ip",
     "user",
 }
+REDACT_SUFFIXES = ("_serial", "_attributes", "machine_id", "_device")
 
 
 def _redact_keys(data: dict[str, Any]) -> dict[str, Any]:
     # by key name: unas_hdd_1_serial, the client lists, and unas_device (shown redacted on its own)
     return {
-        key: "**REDACTED**" if key.endswith(("_serial", "_attributes", "machine_id", "_device")) else value
+        key: "**REDACTED**" if key.endswith(REDACT_SUFFIXES) else value
         for key, value in data.items()
     }
 
 
-async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: UNASConfigEntry) -> dict[str, Any]:
+async def async_get_config_entry_diagnostics(
+        hass: HomeAssistant, entry: UNASConfigEntry
+) -> dict[str, Any]:
     runtime = entry.runtime_data
     client = runtime.data.mqtt_client
     service = runtime.service

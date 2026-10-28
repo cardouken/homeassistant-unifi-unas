@@ -3,13 +3,24 @@ from datetime import timedelta
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
-from conftest import DOMAIN, ENTRY_ID, ROOT_TOPIC, TASK, fire, fire_monitor_cycle, settle, setup_entry
+from conftest import (
+    DOMAIN,
+    ENTRY_ID,
+    ROOT_TOPIC,
+    TASK,
+    fire,
+    fire_monitor_cycle,
+    settle,
+    setup_entry,
+)
 
 GRACE = timedelta(seconds=601)
 
 
 def device(hass, identifier):
-    return dr.async_get(hass).async_get_device_by_identifier((DOMAIN, f"{ENTRY_ID}_{identifier}"), ENTRY_ID)
+    return dr.async_get(hass).async_get_device_by_identifier(
+        (DOMAIN, f"{ENTRY_ID}_{identifier}"), ENTRY_ID
+    )
 
 
 def entity_id(hass, platform, key):
@@ -41,10 +52,13 @@ async def test_silence_never_removes_anything(hass, mqtt_mock, ssh, freezer):
         await settle(hass)
     assert device(hass, "hdd_1") and device(hass, "share_plex")
     assert entity_id(hass, "sensor", "unas_pool1_usage")
-    assert hass.states.get(entity_id(hass, "sensor", "unas_hdd_1_temperature")).state == "unavailable"
+    temperature = entity_id(hass, "sensor", "unas_hdd_1_temperature")
+    assert hass.states.get(temperature).state == "unavailable"
 
 
-async def test_an_item_gone_from_the_inventory_is_removed_after_the_grace(hass, mqtt_mock, ssh, freezer):
+async def test_an_item_gone_from_the_inventory_is_removed_after_the_grace(
+        hass, mqtt_mock, ssh, freezer
+):
     await setup_entry(hass)
     fire_monitor_cycle(hass, bays=("1", "2"))
     await settle(hass)
@@ -59,7 +73,9 @@ async def test_an_item_gone_from_the_inventory_is_removed_after_the_grace(hass, 
     assert device(hass, "hdd_2") is None
     assert entity_id(hass, "sensor", "unas_hdd_2_temperature") is None
     assert device(hass, "hdd_1")
-    cleared = {call.args[0] for call in mqtt_mock.async_publish.call_args_list if call.args[1] == ""}
+    cleared = {
+        call.args[0] for call in mqtt_mock.async_publish.call_args_list if call.args[1] == ""
+    }
     assert f"{ROOT_TOPIC}/hdd/2/temperature" in cleared
     assert not any("/hdd/1/" in topic for topic in cleared)
 

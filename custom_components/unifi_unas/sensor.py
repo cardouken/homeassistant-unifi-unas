@@ -41,6 +41,10 @@ _LOGGER = logging.getLogger(__name__)
 PARALLEL_UPDATES = 0
 
 DIAGNOSTIC = EntityCategory.DIAGNOSTIC
+MEASUREMENT = SensorStateClass.MEASUREMENT
+HIDDEN_DIAGNOSTIC = {"entity_category": DIAGNOSTIC, "entity_registry_enabled_default": False}
+PERCENT = {"native_unit_of_measurement": PERCENTAGE, "state_class": MEASUREMENT}
+TB_SIZE = {"native_unit_of_measurement": "TB", "device_class": SensorDeviceClass.DATA_SIZE}
 TEMPERATURE = {
     "native_unit_of_measurement": UnitOfTemperature.CELSIUS,
     "device_class": SensorDeviceClass.TEMPERATURE,
@@ -66,24 +70,26 @@ def _sensor(key: str, translation_key: str | None = None, **kwargs: Any) -> Sens
 # key is the MQTT key without the unas_ prefix
 SYSTEM_SENSORS = (
     _sensor("cpu_temp", **TEMPERATURE),
-    _sensor("cpu_usage", native_unit_of_measurement=PERCENTAGE, state_class=SensorStateClass.MEASUREMENT),
-    _sensor("fan_speed", state_class=SensorStateClass.MEASUREMENT),
-    _sensor("fan_speed_percent", native_unit_of_measurement=PERCENTAGE, state_class=SensorStateClass.MEASUREMENT),
-    _sensor("memory_usage", native_unit_of_measurement=PERCENTAGE, state_class=SensorStateClass.MEASUREMENT),
+    _sensor("cpu_usage", **PERCENT),
+    _sensor("fan_speed", state_class=MEASUREMENT),
+    _sensor("fan_speed_percent", **PERCENT),
+    _sensor("memory_usage", **PERCENT),
     _sensor(
-        "memory_used", native_unit_of_measurement=UnitOfInformation.MEBIBYTES, device_class=SensorDeviceClass.DATA_SIZE,
-        state_class=SensorStateClass.MEASUREMENT, suggested_unit_of_measurement=UnitOfInformation.GIBIBYTES,
+        "memory_used", native_unit_of_measurement=UnitOfInformation.MEBIBYTES,
+        device_class=SensorDeviceClass.DATA_SIZE, state_class=MEASUREMENT,
+        suggested_unit_of_measurement=UnitOfInformation.GIBIBYTES,
     ),
     _sensor(
         "memory_total", native_unit_of_measurement=UnitOfInformation.MEBIBYTES,
-        device_class=SensorDeviceClass.DATA_SIZE, suggested_unit_of_measurement=UnitOfInformation.GIBIBYTES,
+        device_class=SensorDeviceClass.DATA_SIZE,
+        suggested_unit_of_measurement=UnitOfInformation.GIBIBYTES,
     ),
-    _sensor("disk_read", native_unit_of_measurement="MB/s", device_class=SensorDeviceClass.DATA_RATE,
-            state_class=SensorStateClass.MEASUREMENT),
-    _sensor("disk_write", native_unit_of_measurement="MB/s", device_class=SensorDeviceClass.DATA_RATE,
-            state_class=SensorStateClass.MEASUREMENT),
-    _sensor("smb_connections", state_class=SensorStateClass.MEASUREMENT),
-    _sensor("nfs_mounts", state_class=SensorStateClass.MEASUREMENT),
+    _sensor("disk_read", native_unit_of_measurement="MB/s",
+            device_class=SensorDeviceClass.DATA_RATE, state_class=MEASUREMENT),
+    _sensor("disk_write", native_unit_of_measurement="MB/s",
+            device_class=SensorDeviceClass.DATA_RATE, state_class=MEASUREMENT),
+    _sensor("smb_connections", state_class=MEASUREMENT),
+    _sensor("nfs_mounts", state_class=MEASUREMENT),
     _sensor("uptime", device_class=SensorDeviceClass.TIMESTAMP, entity_category=DIAGNOSTIC),
     _sensor("os_version", entity_category=DIAGNOSTIC),
     _sensor("drive_version", entity_category=DIAGNOSTIC),
@@ -93,16 +99,16 @@ UNVR_ONLY = {"protect_version"}
 UNAS_ONLY = {"smb_connections", "nfs_mounts", "drive_version"}
 
 POOL_SENSORS = (
-    _sensor("usage", "pool_usage", native_unit_of_measurement=PERCENTAGE, state_class=SensorStateClass.MEASUREMENT),
+    _sensor("usage", "pool_usage", **PERCENT),
     _sensor("size", "pool_size", **GB_IN_TB),
-    _sensor("used", "pool_used", state_class=SensorStateClass.MEASUREMENT, **GB_IN_TB),
-    _sensor("available", "pool_available", state_class=SensorStateClass.MEASUREMENT, **GB_IN_TB),
+    _sensor("used", "pool_used", state_class=MEASUREMENT, **GB_IN_TB),
+    _sensor("available", "pool_available", state_class=MEASUREMENT, **GB_IN_TB),
     _sensor("status", "pool_status"),
     _sensor("raid_level", "pool_raid_level"),
 )
 
 SHARE_SENSORS = (
-    _sensor("usage", "share_usage", state_class=SensorStateClass.MEASUREMENT, **GB_IN_TB),
+    _sensor("usage", "share_usage", state_class=MEASUREMENT, **GB_IN_TB),
     _sensor("quota", "share_quota", native_unit_of_measurement="GB"),
     _sensor("pool", "share_pool"),
     _sensor("member_count", "share_member_count"),
@@ -112,30 +118,29 @@ SHARE_SENSORS = (
 
 DRIVE_SENSORS = (
     _sensor("temperature", "drive_temperature", **TEMPERATURE),
-    _sensor("model", "drive_model", entity_category=DIAGNOSTIC, entity_registry_enabled_default=False),
-    _sensor("serial", "drive_serial", entity_category=DIAGNOSTIC, entity_registry_enabled_default=False),
+    _sensor("model", "drive_model", **HIDDEN_DIAGNOSTIC),
+    _sensor("serial", "drive_serial", **HIDDEN_DIAGNOSTIC),
     _sensor("rpm", "drive_rpm", native_unit_of_measurement="rpm"),
-    _sensor("firmware", "drive_firmware", entity_category=DIAGNOSTIC, entity_registry_enabled_default=False),
+    _sensor("firmware", "drive_firmware", **HIDDEN_DIAGNOSTIC),
     _sensor("status", "drive_status"),
-    _sensor("total_size", "drive_total_size", native_unit_of_measurement="TB", device_class=SensorDeviceClass.DATA_SIZE),
+    _sensor("total_size", "drive_total_size", **TB_SIZE),
     _sensor("power_on_hours", "drive_power_on_hours", entity_category=DIAGNOSTIC, **POWER_ON_HOURS),
     _sensor("bad_sectors", "drive_bad_sectors"),
 )
 
 NVME_SENSORS = (
     _sensor("temperature", "drive_temperature", **TEMPERATURE),
-    _sensor("model", "nvme_model", entity_category=DIAGNOSTIC, entity_registry_enabled_default=False),
-    _sensor("serial", "drive_serial", entity_category=DIAGNOSTIC, entity_registry_enabled_default=False),
-    _sensor("firmware", "drive_firmware", entity_category=DIAGNOSTIC, entity_registry_enabled_default=False),
+    _sensor("model", "nvme_model", **HIDDEN_DIAGNOSTIC),
+    _sensor("serial", "drive_serial", **HIDDEN_DIAGNOSTIC),
+    _sensor("firmware", "drive_firmware", **HIDDEN_DIAGNOSTIC),
     _sensor("status", "drive_status"),
-    _sensor("total_size", "drive_total_size", native_unit_of_measurement="TB", device_class=SensorDeviceClass.DATA_SIZE),
+    _sensor("total_size", "drive_total_size", **TB_SIZE),
     _sensor("power_on_hours", "drive_power_on_hours", entity_category=DIAGNOSTIC, **POWER_ON_HOURS),
-    _sensor("percentage_used", "nvme_percentage_used", native_unit_of_measurement=PERCENTAGE,
-            state_class=SensorStateClass.MEASUREMENT),
-    _sensor("available_spare", "nvme_available_spare", native_unit_of_measurement=PERCENTAGE,
-            state_class=SensorStateClass.MEASUREMENT),
+    _sensor("percentage_used", "nvme_percentage_used", **PERCENT),
+    _sensor("available_spare", "nvme_available_spare", **PERCENT),
     _sensor("media_errors", "nvme_media_errors"),
-    _sensor("unsafe_shutdowns", "nvme_unsafe_shutdowns", state_class=SensorStateClass.TOTAL_INCREASING),
+    _sensor("unsafe_shutdowns", "nvme_unsafe_shutdowns",
+            state_class=SensorStateClass.TOTAL_INCREASING),
 )
 
 
@@ -173,7 +178,8 @@ def _backup_status_attrs(task: dict) -> dict:
 
 def _backup_duration(task: dict) -> int | None:
     last_run = task.get("lastTaskRun") or {}
-    started, finished = _timestamp(last_run.get("startedAt")), _timestamp(last_run.get("finishedAt"))
+    started = _timestamp(last_run.get("startedAt"))
+    finished = _timestamp(last_run.get("finishedAt"))
     return int((finished - started).total_seconds()) if started and finished else None
 
 
@@ -194,7 +200,9 @@ def _backup_source(task: dict) -> str | None:
 
 def _backup_source_attrs(task: dict) -> dict | None:
     source_dirs = task.get("sourceDirs") or []
-    return {"source_dirs": source_dirs} if source_dirs and len(", ".join(source_dirs)) > 255 else None
+    if source_dirs and len(", ".join(source_dirs)) > 255:
+        return {"source_dirs": source_dirs}
+    return None
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -207,8 +215,10 @@ class UNASBackupSensorDescription(SensorEntityDescription):
 
 
 BACKUP_SENSORS = (
-    UNASBackupSensorDescription(key="status", translation_key="backup_status", value_fn=_backup_status,
-                                attrs_fn=_backup_status_attrs),
+    UNASBackupSensorDescription(
+        key="status", translation_key="backup_status", value_fn=_backup_status,
+        attrs_fn=_backup_status_attrs,
+    ),
     UNASBackupSensorDescription(
         key="last_run", translation_key="backup_last_run", device_class=SensorDeviceClass.TIMESTAMP,
         value_fn=lambda task: _timestamp((task.get("lastTaskRun") or {}).get("startedAt")),
@@ -224,11 +234,15 @@ BACKUP_SENSORS = (
     ),
     UNASBackupSensorDescription(key="destination", translation_key="backup_destination",
                                 value_fn=_backup_destination),
-    UNASBackupSensorDescription(key="source", translation_key="backup_source", value_fn=_backup_source,
-                                attrs_fn=_backup_source_attrs),
+    UNASBackupSensorDescription(
+        key="source", translation_key="backup_source", value_fn=_backup_source,
+        attrs_fn=_backup_source_attrs,
+    ),
     UNASBackupSensorDescription(key="schedule", translation_key="backup_schedule",
                                 value_fn=lambda task: format_schedule(task.get("schedule"))),
-    UNASBackupSensorDescription(key="name", translation_key="backup_name", value_fn=lambda task: task.get("name")),
+    UNASBackupSensorDescription(
+        key="name", translation_key="backup_name", value_fn=lambda task: task.get("name")
+    ),
 )
 
 
@@ -242,7 +256,10 @@ async def async_setup_entry(
     excluded = UNAS_ONLY if entry.data[CONF_DEVICE_MODEL].startswith("UNVR") else UNVR_ONLY
 
     async_add_entities([
-        *(UNASSensor(coordinator, f"unas_{d.key}", d) for d in SYSTEM_SENSORS if d.key not in excluded),
+        *(
+            UNASSensor(coordinator, f"unas_{d.key}", d)
+            for d in SYSTEM_SENSORS if d.key not in excluded
+        ),
         UNASFanCurveSensor(coordinator),
     ])
 
@@ -340,10 +357,12 @@ class UNASSensor(UNASEntity, SensorEntity):
 
 
 class UNASShareSensor(UNASSensor):
-    def __init__(self, coordinator: UNASDataCoordinator, share: str, description: SensorEntityDescription) -> None:
+    def __init__(
+            self, coordinator: UNASDataCoordinator, share: str, description: SensorEntityDescription
+    ) -> None:
         super().__init__(
-            coordinator, f"unas_share_{share}_{description.key}", description, item=("shares", share),
-            device=share_device(coordinator.hass, coordinator.entry, share),
+            coordinator, f"unas_share_{share}_{description.key}", description,
+            item=("shares", share), device=share_device(coordinator.hass, coordinator.entry, share),
         )
 
     def _unlimited(self) -> bool:
@@ -384,7 +403,9 @@ class UNASFanCurveSensor(UNASEntity, SensorEntity):
     def __init__(self, coordinator: UNASDataCoordinator) -> None:
         super().__init__(
             coordinator, "fan_curve_viz",
-            SensorEntityDescription(key="fan_curve", translation_key="fan_curve", entity_category=DIAGNOSTIC),
+            SensorEntityDescription(
+                key="fan_curve", translation_key="fan_curve", entity_category=DIAGNOSTIC
+            ),
         )
 
     @property
@@ -410,7 +431,8 @@ class UNASFanCurveSensor(UNASEntity, SensorEntity):
         if not self.available:
             return None
         curve = self._curve
-        min_temp, max_temp, min_fan, max_fan = (curve[k] for k in ("min_temp", "max_temp", "min_fan", "max_fan"))
+        min_temp, max_temp = curve["min_temp"], curve["max_temp"]
+        min_fan, max_fan = curve["min_fan"], curve["max_fan"]
         min_fan_pct, max_fan_pct = pwm_to_percent(min_fan), pwm_to_percent(max_fan)
         return {
             "min_temp": min_temp,
@@ -420,13 +442,16 @@ class UNASFanCurveSensor(UNASEntity, SensorEntity):
             "min_fan_percent": min_fan_pct,
             "max_fan_percent": max_fan_pct,
             "curve_points": [
-                [temp, pwm_to_percent(curve_pwm(temp, min_temp, max_temp, min_fan, max_fan))] for temp in range(30, 61)
+                [temp, pwm_to_percent(curve_pwm(temp, min_temp, max_temp, min_fan, max_fan))]
+                for temp in range(30, 61)
             ],
             "curve_formula": f"Linear: {min_temp}°C→{min_fan_pct}%, {max_temp}°C→{max_fan_pct}%",
         }
 
 
-def curve_pwm(temp: float, min_temp: float, max_temp: float, min_fan: float, max_fan: float) -> float:
+def curve_pwm(
+        temp: float, min_temp: float, max_temp: float, min_fan: float, max_fan: float
+) -> float:
     if temp < min_temp:
         return min_fan
     if temp > max_temp or max_temp <= min_temp:
@@ -438,7 +463,10 @@ class UNASBackupSensor(UNASEntity, SensorEntity):
     coordinator: UNASServiceCoordinator
     entity_description: UNASBackupSensorDescription
 
-    def __init__(self, coordinator: UNASServiceCoordinator, task: dict, description: UNASBackupSensorDescription) -> None:
+    def __init__(
+            self, coordinator: UNASServiceCoordinator, task: dict,
+            description: UNASBackupSensorDescription,
+    ) -> None:
         super().__init__(
             coordinator, f"backup_{task['id']}_{description.key}", description,
             device=backup_device(coordinator.hass, coordinator.entry, task),

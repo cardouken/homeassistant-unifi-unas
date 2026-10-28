@@ -13,6 +13,7 @@ USERS_FILE = "/data/unifi-core/config/cache/users.json"
 UIDB_FILE = "/usr/share/unifi-core/app/data/uidb.json"
 TASKS_PATH = "/api/v1/remote-backup/tasks"
 TASK_ID = re.compile(r"[\w-]{1,64}")
+USAGE = "usage: status [paths] | identity | run-backup <id> | set-schedule <id> on|off"
 
 
 class ApiError(Exception):
@@ -172,7 +173,7 @@ def main(argv):
                 raise ApiError(f"invalid schedule state {args[1]!r}")
             result = set_schedule(args[0], args[1] == "on")
         else:
-            result = {"error": "usage: status [paths] | identity | run-backup <id> | set-schedule <id> on|off"}
+            result = {"error": USAGE}
     except ApiError as err:
         result = {"error": str(err)}
     print(json.dumps(result))

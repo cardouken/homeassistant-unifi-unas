@@ -38,7 +38,10 @@ def scenario(seed, ticks):
     hw = g.between(51, 160)
     rows = []
     for _ in range(ticks):
-        t += g.pick((1, 1, 1, 1, 1, 2, 2, 3)) if not g.chance(0.004) else g.pick((12, 40, 299, 301, 900))
+        if not g.chance(0.004):
+            t += g.pick((1, 1, 1, 1, 1, 2, 2, 3))
+        else:
+            t += g.pick((12, 40, 299, 301, 900))
         drift = 0
         if g.chance(0.01):
             drift = g.pick((-30, -15, 15, 30, 60))
@@ -71,7 +74,9 @@ def scenario(seed, ticks):
             since_sample = 0
 
         temps = sorted((d // 10 for d in drives), reverse=True)
-        rows.append({"t": t, "sample": sample, "hw": new_hw, "settings": dict(settings), "temps": temps})
+        rows.append({
+            "t": t, "sample": sample, "hw": new_hw, "settings": dict(settings), "temps": temps
+        })
     return rows
 
 

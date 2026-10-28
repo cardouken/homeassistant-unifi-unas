@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import json
+import logging
 import re
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
-from datetime import datetime, timedelta
 
 from homeassistant.components import mqtt
 from homeassistant.core import HomeAssistant, callback
@@ -86,7 +86,9 @@ class UNASMQTTClient:
             return
 
         try:
-            sub = await mqtt.async_subscribe(self.hass, f"{self.mqtt_root}/#", self._handle_message, qos=0)
+            sub = await mqtt.async_subscribe(
+                self.hass, f"{self.mqtt_root}/#", self._handle_message, qos=0
+            )
             self._subscriptions.append(sub)
             _LOGGER.debug("Subscribed to MQTT topic: %s/#", self.mqtt_root)
         except Exception as err:
@@ -113,13 +115,13 @@ class UNASMQTTClient:
             self.topics.add(topic)
         else:
             self.topics.discard(topic)
-        
+
         parts = topic[len(self.mqtt_root):].lstrip("/").split("/")
         if not parts:
             return
-        
+
         num_parts = len(parts)
-        
+
         if num_parts == 1:
             self._handle_one_part(parts, msg.payload)
         elif num_parts == 2:
@@ -141,20 +143,20 @@ class UNASMQTTClient:
 
     def _handle_two_part(self, parts, payload):
         category, item = parts[0], parts[1]
-        
+
         # unas/system/<metric>
         if category == "system":
             self._store_value(f"unas_{item}", payload)
             if item == "machine_id" and payload:
                 self._recent_machine_ids[payload] = datetime.now()
-        
+
         # unas/smb/connections or unas/smb/clients
         elif category == "smb":
             if item == "connections":
                 self._store_value("unas_smb_connections", payload)
             elif item == "clients":
                 self._store_attributes("unas_smb_connections", payload)
-        
+
         elif category == "fan":
             if item == "availability":
                 self._fan_status = payload
@@ -166,18 +168,18 @@ class UNASMQTTClient:
                 self._store_value("unas_nfs_mounts", payload)
             elif item == "clients":
                 self._store_attributes("unas_nfs_mounts", payload)
-        
+
         # unas/control/<setting>
         elif category == "control":
             self._store_value(item, payload)
 
     def _handle_three_part(self, parts, payload):
         category, identifier, metric = parts[0], parts[1], parts[2]
-        
+
         # unas/hdd/<bay>/<metric> or unas/nvme/<slot>/<metric>
         if category in ("hdd", "nvme"):
             self._store_value(f"unas_{category}_{identifier}_{metric}", payload)
-        
+
         # unas/pool/<num>/<metric>
         elif category == "pool":
             self._store_value(f"unas_pool{identifier}_{metric}", payload)

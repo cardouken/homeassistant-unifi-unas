@@ -6,6 +6,9 @@ dynamic = ["version"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+# the tests import the on-device scripts and their helpers as top-level modules
+src = [".", "tests", "tests/scripts", "custom_components/unifi_unas/scripts"]
+extend-exclude = ["custom_components/unifi_unas/scripts/vendor"]
 
 [tool.ruff.lint]
 select = [
@@ -15,6 +18,11 @@ select = [
     "I",  # isort
     "UP", # pyupgrade
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# run on the NAS, UniFi OS 5 has Python 3.9
+"custom_components/unifi_unas/scripts/*" = ["UP"]
+"tests/scripts/*" = ["UP"]
 
 [tool.mypy]
 python_version = "3.12"

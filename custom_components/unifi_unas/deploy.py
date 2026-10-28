@@ -22,7 +22,8 @@ ATTEMPTS_BEFORE_REPAIR = 3
 
 class Deployer:
     def __init__(
-            self, hass: HomeAssistant, entry: ConfigEntry, ssh: SSHManager, service: UNASServiceCoordinator
+            self, hass: HomeAssistant, entry: ConfigEntry, ssh: SSHManager,
+            service: UNASServiceCoordinator,
     ) -> None:
         self.hass = hass
         self.entry = entry
@@ -88,22 +89,28 @@ class Deployer:
         if outdated is None:
             _LOGGER.info("Reinstalling the scripts on %s", host)
         else:
-            _LOGGER.info("Deploying %s to %s", ", ".join(path.rsplit("/", 1)[-1] for path in outdated), host)
+            names = ", ".join(path.rsplit("/", 1)[-1] for path in outdated)
+            _LOGGER.info("Deploying %s to %s", names, host)
         self.attempts += 1
         self._retry_at = time.monotonic() + RETRY_DELAYS[min(self.attempts, len(RETRY_DELAYS)) - 1]
         try:
             restarted = await self.ssh.deploy_scripts(
-                self.entry.data[CONF_DEVICE_MODEL], get_mqtt_topics(self.entry.entry_id)["root"], outdated
+                self.entry.data[CONF_DEVICE_MODEL],
+                get_mqtt_topics(self.entry.entry_id)["root"],
+                outdated,
             )
         except Exception as err:
             self.last_error = f"{type(err).__name__}: {err}"
             _LOGGER.warning(
-                "Deploying the scripts to %s failed (attempt %d): %s", host, self.attempts, self.last_error
+                "Deploying the scripts to %s failed (attempt %d): %s",
+                host, self.attempts, self.last_error,
             )
             if self.attempts >= ATTEMPTS_BEFORE_REPAIR:
                 self._raise_repair(self.last_error)
             return
-        _LOGGER.info("Scripts deployed to %s, restarted: %s", host, ", ".join(restarted) or "nothing")
+        _LOGGER.info(
+            "Scripts deployed to %s, restarted: %s", host, ", ".join(restarted) or "nothing"
+        )
         self.last_error = None
         # attempts reset once a check finds nothing outdated
         await self.service.async_request_refresh()

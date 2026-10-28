@@ -7,7 +7,6 @@ from datetime import timedelta
 from typing import Any
 
 import asyncssh
-from homeassistant.components import mqtt
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -167,7 +166,9 @@ class UNASServiceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise UpdateFailed(f"SSH host key verification failed for {host}: {err}") from err
         except asyncssh.PermissionDenied as err:
             # starts a reauth flow and stops polling until the entry is reloaded
-            raise ConfigEntryAuthFailed(f"The UNAS at {host} rejected the SSH login: {err}") from err
+            raise ConfigEntryAuthFailed(
+                f"The UNAS at {host} rejected the SSH login: {err}"
+            ) from err
         except Exception as err:
             self._track_outage(host)
             raise UpdateFailed(f"Cannot check the UNAS at {host} over SSH: {err}") from err

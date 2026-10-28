@@ -31,13 +31,17 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     coordinator = entry.runtime_data.service
-    async_add_entities(UNASServiceSensor(coordinator, description) for description in SERVICE_SENSORS)
+    async_add_entities(
+        UNASServiceSensor(coordinator, description) for description in SERVICE_SENSORS
+    )
 
 
 class UNASServiceSensor(UNASEntity, BinarySensorEntity):
     coordinator: UNASServiceCoordinator
 
-    def __init__(self, coordinator: UNASServiceCoordinator, description: BinarySensorEntityDescription) -> None:
+    def __init__(
+            self, coordinator: UNASServiceCoordinator, description: BinarySensorEntityDescription
+    ) -> None:
         super().__init__(coordinator, description.key, description)
 
     @property
