@@ -31,7 +31,8 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
 
 ## Known Limitations
 
-- **Device Model** - Cannot be changed after initial setup. Changing requires removing and re-adding the integration.
+- **UNVR Gen 2, UNVR Gen 2 Pro and Enterprise NAS** - Not recognized yet. Setup asks you to confirm before installing
+  anything on them.
 
 ## Supported Devices
 
@@ -65,22 +66,25 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
   attributes), snapshot status, encryption status
 - **Network** - SMB connection count (with client details as attributes), NFS mount count (with share details as
   attributes)
-- **Backup Tasks** - Status, progress percentage, last run time, next scheduled run, source/destination paths
+- **Backup Tasks** - Status, last run, next scheduled run, duration, source, destination, schedule
+
+Drive model, serial and firmware and share encryption are disabled by default on new installs; enable them from the
+entity settings if you want them.
 
 ### Binary Sensors
 
-- **Scripts Installed** - Whether monitoring scripts are deployed on UNAS
+- **Scripts Installed** - Whether the scripts on the UNAS are installed and up to date
 - **Monitor Service** - Whether the monitoring service is running
 - **Fan Control Service** - Whether the fan control service is running
 
 ### Controls
 
 - **Fan Mode** (Select) - UNAS Managed, Custom Curve, Target Temperature, or Set Speed
-- **Target Temperature** (Number) - Desired drive temperature for Target Temperature mode (30-50°C)
+- **Target Temperature** (Number) - Desired drive temperature for Target Temperature mode (20-50°C)
 - **Temperature Metric** (Select) - Max (hottest drive) or Avg (average) for Target Temperature mode
 - **Response Speed** (Select) - Relaxed, Balanced, or Aggressive for Target Temperature mode
-- **Fan Speed** (Number) - Manual speed for Set Speed mode (0-100%)
-- **Min/Max Temperature** (Numbers) - Temperature range for Custom Curve and Target Temperature modes (20-60°C)
+- **Fan Speed** (Number) - Manual speed for Set Speed mode (0-100%); in the other modes it shows the current speed
+- **Min/Max Temperature** (Numbers) - Temperature range for Custom Curve mode (20-60°C)
 - **Min/Max Fan Speed** (Numbers) - Fan speed range/limits (0-100%)
 
 > **Note:** Controls are context-sensitive—only settings relevant to your selected fan mode are adjustable.
@@ -149,6 +153,8 @@ After adding, restart Home Assistant or reload template entities.
 
 ### Prerequisites
 
+Home Assistant **2026.8** or newer.
+
 1. **MQTT Integration** (Required) - Must be installed **before** adding UniFi UNAS
     - Settings → Devices & Services → Add Integration → MQTT
     - If using Mosquitto add-on: Select automatic discovery
@@ -197,8 +203,9 @@ Enter details:
 - **MQTT User**: Your Mosquitto username (required)
 - **MQTT Password**: Your Mosquitto password (required)
 - **Use TLS**: Enable if your MQTT broker uses TLS (see [Secure MQTT (TLS)](#secure-mqtt-tls-optional))
-- **Device Model**: Select your UNAS model from the dropdown
-- **Polling Interval**: How often to poll for metrics (5-60 seconds)
+- **Polling Interval**: How often to poll for metrics (5-60 seconds), can be changed later under **Configure**
+
+The model is detected from the UNAS.
 
 The integration will automatically:
 
@@ -289,7 +296,7 @@ when needed and backs off when stable.
 
 | Setting                | Description                                                   |
 |------------------------|---------------------------------------------------------------|
-| **Target Temperature** | The temperature you want to maintain (20-50°C, default: 40°C) |
+| **Target Temperature** | The temperature you want to maintain (20-50°C, default: 42°C) |
 | **Temperature Metric** | **Max** = hottest drive, **Average** = average of all drives  |
 | **Response Speed**     | How aggressively the controller reacts (see below)            |
 | **Min/Max Fan Speed**  | Limits for the controller (it won't go outside this range)    |
@@ -327,7 +334,8 @@ Lock fans to a fixed speed (0-100%). Use the Fan Speed slider to set the desired
 
 ### Scripts Not Installing
 
-Check logs: Settings → System → Logs → search "unifi_unas"
+Check logs: Settings → System → Logs → search "unifi_unas". For an issue report, download the diagnostics from the
+integration's menu (credentials, serial numbers and addresses are redacted).
 
 Common issues:
 
@@ -348,32 +356,32 @@ Common issues:
 
 ### Drives Not Appearing
 
-New or moved drives may take up to 60 seconds to appear (grace period for detection).
+New drives appear after the next monitor cycle. Drives the UNAS no longer reports are removed after 10 minutes.
 
 ### Wrong Bay Numbers
 
-Your device model may have incorrect bay mappings. See [Supported Devices](#supported-devices) section to help confirm
-mappings.
+On UNAS models the bay numbers come from UniFi Drive and should match its storage page. If they don't, or on a UNVR,
+please open an issue with your model and the output of `python3 /root/unifi_unas/unas_monitor.py --once --json`.
 
 ### MQTT Integration Removed
 
-If you remove the MQTT integration after setup, a repair issue will appear. Reinstall MQTT and reload the integration.
+The integration needs the MQTT integration and retries its setup until MQTT is available again.
 
 ### After Firmware Update
 
-Scripts redeploy automatically on startup if missing. If needed, manually reinstall via the "Reinstall Scripts" button
-on the device page.
+Scripts redeploy automatically if missing. If needed, manually reinstall via the "Reinstall Scripts" button on the
+device page.
 
 ### Removing Integration
 
 Removing the integration fully restores your UNAS to stock. The cleanup process:
 
 1. **Stops and disables services** - `unas_monitor` and `fan_control` systemd services
-2. **Removes all scripts** - `/root/unas_monitor.py`, `/root/fan_control.sh`
+2. **Removes all scripts** - `/root/unifi_unas`
 3. **Removes service files** - From `/etc/systemd/system/`
-4. **Removes temp files** - State files from `/tmp/`
-5. **Uninstalls packages** - `mosquitto-clients`, `paho-mqtt`, `python3-pip`
-6. **Restores fan control** - Returns PWM control to UNAS-managed mode
+4. **Removes leftovers from 0.9.x and older** - Scripts in `/root`, state files in `/tmp`, the fan control log, and
+   the `paho-mqtt` and `mosquitto-clients` packages those versions installed
+5. **Restores fan control** - Returns PWM control to UNAS-managed mode
 
 No manual cleanup is required.
 
@@ -387,6 +395,9 @@ Topics use the prefix `unas/{entry_id}/` where `entry_id` is the first 8 charact
 ```
 unas/{id}/
 ├── availability          # "online" or "offline"
+├── fan/
+│   ├── availability      # fan control "online" or "offline"
+│   └── state             # JSON: mode, PWM, drive temps, fault
 ├── system/               # CPU, memory, disk I/O, fan, uptime
 ├── hdd/{bay}/            # Per-drive SMART data
 ├── nvme/{slot}/          # NVMe drive data
@@ -396,7 +407,7 @@ unas/{id}/
 ├── nfs/                  # NFS mounts
 └── control/
     ├── monitor_interval  # Polling interval
-    └── fan/              # Fan mode and curve parameters
+    └── fan/              # Fan mode, Set Speed PWM (speed) and curve parameters
 ```
 
 </details>
@@ -418,10 +429,14 @@ logger:
 <details>
 <summary><strong>Script Locations</strong></summary>
 
-Scripts are deployed to `/root/` on the UNAS:
+Scripts are deployed to `/root/unifi_unas/` on the UNAS:
 
-- `/root/unas_monitor.py` - Monitoring script
-- `/root/fan_control.sh` - Fan control script
+- `unas_monitor.py` - Monitoring script
+- `fan_control.py` - Fan control script
+- `unas_common.py` - Shared config and MQTT setup
+- `vendor/` - Bundled [paho-mqtt](https://github.com/eclipse-paho/paho.mqtt.python) 2.1.0 (EPL-2.0 or BSD-3-Clause)
+- `config.json` - MQTT connection details, readable by root only
+- `fan_settings.json` - Last fan settings, so fan control keeps working while the MQTT broker is unreachable
 
 Systemd service files:
 
