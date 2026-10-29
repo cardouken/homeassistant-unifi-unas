@@ -1,5 +1,6 @@
 {
   "config": {
+    "flow_title": "{name}",
     "step": {
       "user": {
         "title": "Connect to UniFi UNAS",
@@ -97,7 +98,8 @@
       "mqtt_required": "MQTT integration must be installed and configured before setting up UniFi UNAS. Please add the MQTT integration first, then try again.",
       "reconfigure_successful": "Configuration updated successfully. The integration is reconnecting with the new settings.",
       "reauth_successful": "Logged in again, the integration is reloading.",
-      "wrong_device": "That address belongs to a different NAS. Add it as a new integration instead."
+      "wrong_device": "That address belongs to a different NAS. Add it as a new integration instead.",
+      "discovery_started": "Looking for UniFi consoles on the network."
     }
   },
   "options": {

@@ -110,12 +110,25 @@ async def test_a_configured_host_aborts_before_any_network_test(hass, mqtt_mock,
 
 async def test_the_same_nas_on_a_new_address_updates_the_entry(hass, mqtt_mock, ssh):
     entry = MockConfigEntry(
-        domain=DOMAIN, data=entry_data(), unique_id="0cea14c0c079", version=2, minor_version=2
+        domain=DOMAIN, data=entry_data(verify_host_key=True, host_key="192.168.1.25 ssh-ed25519 A"),
+        unique_id="0cea14c0c079", version=2, minor_version=2, title="UNAS (192.168.1.25)",
     )
     entry.add_to_hass(hass)
     result = await submit(hass, host="192.168.1.99")
     assert result["reason"] == "already_configured"
     assert entry.data["host"] == "192.168.1.99"
+    # same NAS, same key
+    assert entry.data["host_key"] == "192.168.1.99 ssh-ed25519 A"
+    assert entry.title == "UNAS (192.168.1.99)"
+
+
+async def test_adding_an_ignored_nas_by_hand_replaces_the_ignored_entry(hass, mqtt_mock, ssh):
+    MockConfigEntry(
+        domain=DOMAIN, data={}, unique_id="0cea14c0c079", source=config_entries.SOURCE_IGNORE
+    ).add_to_hass(hass)
+    result = await submit(hass)
+    assert result["type"] == "create_entry"
+    assert [e.source for e in hass.config_entries.async_entries(DOMAIN)] == ["user"]
 
 
 async def test_existing_entries_adopt_the_serial(hass, mqtt_mock, ssh):

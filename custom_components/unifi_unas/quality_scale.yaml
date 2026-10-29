@@ -50,10 +50,14 @@ rules:
   # Gold
   devices: done
   diagnostics: done
-  discovery: todo
+  discovery:
+    status: done
+    comment: DHCP from Ubiquiti devices starts a UniFi discovery scan, which offers UNAS and UNVR consoles.
   discovery-update-info:
-    status: todo
-    comment: A known NAS set up again on a new address updates the existing entry.
+    status: done
+    comment: >-
+      A known NAS found on a new address is moved there only while its configured address doesn't
+      answer, since a NAS with two network ports answers discovery on either.
   docs-data-update: done
   docs-examples: done
   docs-known-limitations: done

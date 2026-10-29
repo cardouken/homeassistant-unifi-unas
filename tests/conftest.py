@@ -95,6 +95,21 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     yield
 
 
+class FakeScanner:
+    devices = []
+
+    async def async_scan(self, timeout=None):
+        return list(FakeScanner.devices)
+
+
+@pytest.fixture(autouse=True)
+def scanner():
+    # setup starts UniFi discovery, which would broadcast on the network
+    FakeScanner.devices = []
+    with patch("custom_components.unifi_unas.discovery.AIOUnifiScanner", FakeScanner):
+        yield FakeScanner
+
+
 @pytest.fixture(autouse=True)
 def no_mqtt_misc_timer():
     # the mocked MQTT client never cancels this timer, it would mask our own lingering timers

@@ -194,6 +194,9 @@ Or manually: HACS → Integrations → Search "UniFi UNAS" → Download → Rest
 
 Or manually: Settings → Devices & Services → Add Integration → Search "UniFi UNAS"
 
+Home Assistant also discovers a UNAS on the network and shows it under **Discovered**. If a configured UNAS moves to a
+new address, the integration follows it once it answers there over SSH.
+
 Enter details:
 
 - **Host**: UNAS IP (e.g., `192.168.1.25`)

@@ -10,7 +10,7 @@ import asyncssh
 import pytest
 
 from custom_components.unifi_unas import ssh_manager
-from custom_components.unifi_unas.ssh_manager import NASCommandError, SSHManager
+from custom_components.unifi_unas.ssh_manager import NASCommandError, SSHManager, fetch_host_key
 
 PASSWORD = "secret"
 
@@ -152,6 +152,15 @@ async def test_no_connection_outlives_a_disconnect(nas):
     assert mgr._conn is None
     with pytest.raises(ConnectionAbortedError):
         await mgr.execute_command("uptime")
+
+
+async def test_fetch_host_key_without_logging_in(nas):
+    key = await fetch_host_key("127.0.0.1", nas.port)
+    assert key.startswith("ssh-ed25519 ")
+    mgr = nas.manager()
+    await mgr.connect()
+    assert mgr.server_host_key.split()[1:] == key.split()
+    await mgr.disconnect()
 
 
 async def test_status_runs_the_helper_from_stdin(nas):

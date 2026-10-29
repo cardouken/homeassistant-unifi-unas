@@ -33,5 +33,6 @@ jobs:
         run: >-
           uv run --no-project --python 3.14
           --with pytest-homeassistant-custom-component==0.13.373 --with asyncssh
+          --with unifi-discovery==1.5.0
           pytest -q tests --ignore=tests/scripts
           --cov=custom_components/unifi_unas --cov-fail-under=95

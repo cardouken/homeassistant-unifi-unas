@@ -11,9 +11,11 @@ import asyncssh
 import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import mqtt
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import CONF_HOST, CONF_PASSWORD, CONF_USERNAME
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.data_entry_flow import AbortFlow, FlowResult
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.selector import (
     BooleanSelector,
     NumberSelector,
@@ -23,6 +25,7 @@ from homeassistant.helpers.selector import (
     SelectSelectorConfig,
     SelectSelectorMode,
 )
+from homeassistant.helpers.service_info.dhcp import DhcpServiceInfo
 
 from .const import (
     CONF_DEVICE_MODEL,
@@ -47,7 +50,8 @@ from .const import (
     MIN_SCAN_INTERVAL,
     SYSID_MODELS,
 )
-from .ssh_manager import NASCommandError, SSHManager
+from .discovery import async_start_discovery
+from .ssh_manager import NASCommandError, SSHManager, fetch_host_key
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,6 +89,7 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
 class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 2
     MINOR_VERSION = 2
+    _discovered_host: str | None = None
 
     @staticmethod
     @callback
@@ -223,8 +228,11 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 serial = (identity or {}).get("serial")
                 await self.async_set_unique_id(serial.lower() if serial else user_input[CONF_HOST])
-                # the same NAS on a new address just gets its host updated
-                self._abort_if_unique_id_configured(updates={CONF_HOST: user_input[CONF_HOST]})
+                entry = self.hass.config_entries.async_entry_for_domain_unique_id(
+                    DOMAIN, self.unique_id
+                )
+                if entry and entry.source != config_entries.SOURCE_IGNORE:
+                    await self._async_move_entry(entry, user_input[CONF_HOST])
                 self._pending_input = dict(user_input)
                 self._identity = identity
                 model = SYSID_MODELS.get((identity or {}).get("sysid"))
@@ -233,9 +241,86 @@ class UNASProConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._pending_input[CONF_DEVICE_MODEL] = model
                 return await self._async_step_mqtt()
 
-        return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        schema = STEP_USER_DATA_SCHEMA
+        if self._discovered_host and user_input is None:
+            schema = self.add_suggested_values_to_schema(schema, {CONF_HOST: self._discovered_host})
+        return self.async_show_form(step_id="user", data_schema=schema, errors=errors)
+
+    async def async_step_dhcp(self, discovery_info: DhcpServiceInfo) -> FlowResult:
+        mac = dr.format_mac(discovery_info.macaddress)
+        if self._known_entry(mac) is not None:
+            return await self._async_step_discovered(
+                discovery_info.ip, mac, discovery_info.hostname
+            )
+        # some UniFi device, only a discovery scan tells whether it is a UNAS
+        async_start_discovery(self.hass)
+        return self.async_abort(reason="discovery_started")
+
+    async def async_step_integration_discovery(
+            self, discovery_info: dict[str, Any]
+    ) -> FlowResult:
+        return await self._async_step_discovered(
+            discovery_info["host"], discovery_info["mac"], discovery_info.get("hostname")
         )
+
+    async def _async_step_discovered(
+            self, host: str, mac: str, hostname: str | None
+    ) -> FlowResult:
+        if entry := self._known_entry(mac):
+            await self._async_move_entry(entry, host, only_if_unreachable=True)
+        await self.async_set_unique_id(mac.replace(":", ""))
+        self._abort_if_unique_id_configured()
+        self._async_abort_entries_match({CONF_HOST: host})
+        self._discovered_host = host
+        self.context["title_placeholders"] = {"name": hostname or host}
+        return await self.async_step_user()
+
+    def _known_entry(self, mac: str) -> ConfigEntry | None:
+        # entries are keyed by the serial, which is the MAC on UniFi consoles; the main device
+        # also carries the MAC, for entries from before 0.10 that are still keyed by address
+        entry = self.hass.config_entries.async_entry_for_domain_unique_id(
+            DOMAIN, mac.replace(":", "")
+        )
+        if entry:
+            # an ignored one has no data, the unique_id check aborts the flow
+            return None if entry.source == config_entries.SOURCE_IGNORE else entry
+        dev_reg = dr.async_get(self.hass)
+        for entry in self.hass.config_entries.async_entries(DOMAIN):
+            connection = (dr.CONNECTION_NETWORK_MAC, mac)
+            if dev_reg.async_get_device_by_connection(connection, entry.entry_id):
+                return entry
+        return None
+
+    async def _async_move_entry(
+            self, entry: ConfigEntry, host: str, only_if_unreachable: bool = False
+    ) -> None:
+        old = entry.data[CONF_HOST]
+        if host != old and (not only_if_unreachable or await self._moved_to(entry, host)):
+            data = {**entry.data, CONF_HOST: host}
+            if pin := entry.data.get(CONF_HOST_KEY):
+                # same NAS, same key, only the address in the pin changes
+                data[CONF_HOST_KEY] = " ".join([host, *pin.split()[1:]])
+            # the update listener reloads
+            self.hass.config_entries.async_update_entry(
+                entry, data=data, title=entry.title.replace(f"({old})", f"({host})")
+            )
+        raise AbortFlow("already_configured")
+
+    async def _moved_to(self, entry: ConfigEntry, host: str) -> bool:
+        # discovery packets prove nothing: move only a NAS that stopped answering where it is
+        # (one with two NICs answers on both) to an address that answers with its pinned key
+        if (
+            entry.state is not ConfigEntryState.LOADED
+            or entry.runtime_data.service.last_update_success
+        ):
+            return False
+        try:
+            key = await fetch_host_key(host)
+        except (asyncssh.Error, OSError, TimeoutError) as err:
+            _LOGGER.debug("Not moving %s to %s: %s", entry.title, host, err)
+            return False
+        pin = entry.data.get(CONF_HOST_KEY)
+        return pin is None or pin.split()[1:] == key.split()
 
     async def async_step_unrecognized_device(
             self, user_input: dict[str, Any] | None = None

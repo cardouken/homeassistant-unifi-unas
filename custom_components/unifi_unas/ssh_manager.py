@@ -61,6 +61,14 @@ def affected_services(paths: list[str]) -> list[str]:
     return [service for service in SERVICES if service in affected]
 
 
+async def fetch_host_key(host: str, port: int = 22, timeout: float = 10) -> str:
+    # "keytype base64" of whatever answers on host, without logging in
+    key = await asyncio.wait_for(asyncssh.get_server_host_key(host, port), timeout)
+    if key is None:
+        raise OSError(f"no SSH host key from {host}")
+    return " ".join(key.export_public_key().decode().split()[:2])
+
+
 class SSHManager:
     def __init__(
             self,

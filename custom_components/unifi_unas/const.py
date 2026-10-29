@@ -69,6 +69,22 @@ SYSID_MODELS = {
     "ea20": "UNVR_PRO",
     "ea61": "UNVR_INSTANT",
 }
+# what the same consoles answer UniFi discovery with (uidb.json short names, "-" removed)
+DISCOVERY_PLATFORMS = {
+    "UNASPRO": "UNAS_PRO",
+    "UNASPRO8": "UNAS_PRO_8",
+    "UNASPRO4": "UNAS_PRO_4",
+    "UNAS4W": "UNAS_4",
+    "UNAS4B": "UNAS_4",
+    "UNAS2W": "UNAS_2",
+    "UNAS2B": "UNAS_2",
+    "UNVR": "UNVR",
+    "UNVR4": "UNVR",
+    "NVR": "UNVR",
+    "UNVRPRO": "UNVR_PRO",
+    "UNVRINS": "UNVR_INSTANT",
+    "UNVRINSTANT": "UNVR_INSTANT",
+}
 
 
 def get_device_info(entry_data: dict) -> tuple[str, str]:

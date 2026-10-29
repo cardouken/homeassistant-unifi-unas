@@ -9,8 +9,10 @@ from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.typing import ConfigType
 
 from .const import (
     CONF_DEVICE_MODEL,
@@ -36,6 +38,7 @@ from .const import (
 from .coordinator import UNASDataCoordinator, UNASServiceCoordinator
 from .deploy import Deployer
 from .devices import DeviceSync, async_register_main_device
+from .discovery import async_start_discovery
 from .reconcile import Reconciler
 from .ssh_manager import BUNDLE_DIR, LEGACY_CLEANUP, SSHManager
 from .stale_topics import async_schedule_scan
@@ -84,6 +87,14 @@ def connection_data(entry: ConfigEntry) -> dict:
 
 
 type UNASConfigEntry = ConfigEntry[UNASRuntime]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    # once set up, a scan every hour also follows a NAS that moved to another address
+    async_start_discovery(hass)
+    return True
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
