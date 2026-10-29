@@ -80,6 +80,7 @@ class UNASDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             hass, _LOGGER, cooldown=PUSH_DEBOUNCE, immediate=False, function=self._async_push
         )
         self.mqtt_client = UNASMQTTClient(hass, entry.entry_id, self._debouncer.async_schedule_call)
+        self._online: dict[str, bool] = {}
 
     async def async_start(self) -> None:
         await self.mqtt_client.async_subscribe()
@@ -114,11 +115,31 @@ class UNASDataCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _async_push(self) -> None:
         self.async_set_updated_data(self.mqtt_client.get_data())
         self._check_duplicate_publishers()
+        self._log_availability()
 
     @callback
     def _async_tick(self, _now) -> None:
         self.async_update_listeners()
         self._check_duplicate_publishers()
+        self._log_availability()
+
+    def _log_availability(self) -> None:
+        # once per change, and only after it was seen online (nothing has arrived yet at boot)
+        host = self.entry.data[CONF_HOST]
+        for name, online in (
+            ("monitor", self.mqtt_client.is_available()),
+            ("fan control", self.mqtt_client.fan_available()),
+        ):
+            was = self._online.get(name)
+            if online == was or (was is None and not online):
+                continue
+            if was is not None:
+                if online:
+                    _LOGGER.info("The %s on %s is reporting again", name, host)
+                else:
+                    _LOGGER.info("The %s on %s stopped reporting, its entities are unavailable",
+                                 name, host)
+            self._online[name] = online
 
     def _check_duplicate_publishers(self) -> None:
         machine_ids = self.mqtt_client.get_recent_machine_ids()
@@ -163,15 +184,25 @@ class UNASServiceCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         except asyncssh.HostKeyNotVerifiable as err:
             # not an outage, it repeats until the key is re-pinned through the repair
             raise_host_key_repair(self.hass, self.entry)
-            raise UpdateFailed(f"SSH host key verification failed for {host}: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="host_key_failed",
+                translation_placeholders={"host": host, "error": str(err)},
+            ) from err
         except asyncssh.PermissionDenied as err:
             # starts a reauth flow and stops polling until the entry is reloaded
             raise ConfigEntryAuthFailed(
-                f"The UNAS at {host} rejected the SSH login: {err}"
+                translation_domain=DOMAIN,
+                translation_key="ssh_auth_failed",
+                translation_placeholders={"host": host, "error": str(err)},
             ) from err
         except Exception as err:
             self._track_outage(host)
-            raise UpdateFailed(f"Cannot check the UNAS at {host} over SSH: {err}") from err
+            raise UpdateFailed(
+                translation_domain=DOMAIN,
+                translation_key="ssh_failed",
+                translation_placeholders={"host": host, "error": str(err)},
+            ) from err
 
         self._failing_since = None
         ir.async_delete_issue(self.hass, DOMAIN, f"ssh_unavailable_{self.entry.entry_id}")

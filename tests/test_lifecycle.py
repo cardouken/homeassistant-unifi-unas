@@ -1,7 +1,11 @@
 import asyncio
+import logging
 from unittest.mock import patch
 
+import asyncssh
+import pytest
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import device_registry as dr
 from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_mqtt_message
 
@@ -10,6 +14,7 @@ from conftest import (
     ENTRY_ID,
     ROOT_TOPIC,
     entry_data,
+    fire,
     fire_monitor_cycle,
     settle,
     setup_entry,
@@ -17,6 +22,7 @@ from conftest import (
 from custom_components.unifi_unas import (
     UNAS_UNINSTALL_COMMANDS,
     async_remove_config_entry_device,
+    async_setup_entry,
     repairs,
 )
 
@@ -108,3 +114,48 @@ async def test_the_host_key_repair_pins_again(hass, mqtt_mock, ssh):
     await hass.async_block_till_done()
     assert "host_key" not in entry.data
     assert entry.state is ConfigEntryState.LOADED
+
+
+async def test_going_offline_and_back_is_logged_once(hass, mqtt_mock, ssh, caplog):
+    await setup_entry(hass)
+    fire_monitor_cycle(hass)
+    fire(hass, "fan/availability", "online")
+    await settle(hass)
+    caplog.set_level(logging.INFO, "custom_components.unifi_unas")
+    for _ in range(2):
+        fire(hass, "availability", "offline")
+        fire(hass, "fan/availability", "offline")
+        await settle(hass)
+    fire_monitor_cycle(hass)
+    fire(hass, "fan/availability", "online")
+    await settle(hass)
+    messages = [r.getMessage() for r in caplog.records if "reporting" in r.getMessage()]
+    assert messages == [
+        "The monitor on 192.168.1.25 stopped reporting, its entities are unavailable",
+        "The fan control on 192.168.1.25 stopped reporting, its entities are unavailable",
+        "The monitor on 192.168.1.25 is reporting again",
+        "The fan control on 192.168.1.25 is reporting again",
+    ]
+
+
+@pytest.mark.parametrize("error,key", [
+    (OSError("no route to host"), "ssh_failed"),
+    (asyncssh.HostKeyNotVerifiable("mismatch"), "host_key_failed"),
+])
+async def test_update_errors_are_translated(hass, mqtt_mock, ssh, error, key):
+    entry = await setup_entry(hass)
+    ssh.instances[0].error = error
+    service = entry.runtime_data.service
+    await service.async_refresh()
+    assert service.last_exception.translation_key == key
+    assert "192.168.1.25" in str(service.last_exception)
+
+
+async def test_mqtt_not_ready_is_translated(hass, mqtt_mock, ssh):
+    entry = MockConfigEntry(domain=DOMAIN, data=entry_data(), entry_id=ENTRY_ID, version=2)
+    with (
+        patch("homeassistant.components.mqtt.async_wait_for_mqtt_client", return_value=False),
+        pytest.raises(ConfigEntryNotReady) as err,
+    ):
+        await async_setup_entry(hass, entry)
+    assert err.value.translation_key == "mqtt_not_ready"

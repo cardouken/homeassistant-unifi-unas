@@ -129,7 +129,7 @@ def _build_ssh_manager(entry: ConfigEntry) -> SSHManager:
 
 async def async_setup_entry(hass: HomeAssistant, entry: UNASConfigEntry) -> bool:
     if not await mqtt.async_wait_for_mqtt_client(hass):
-        raise ConfigEntryNotReady("The MQTT integration is not available")
+        raise ConfigEntryNotReady(translation_domain=DOMAIN, translation_key="mqtt_not_ready")
     # raised by 0.9.x and never cleared there
     ir.async_delete_issue(hass, DOMAIN, "mqtt_missing")
 

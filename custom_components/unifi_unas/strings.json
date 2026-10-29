@@ -165,6 +165,18 @@
     },
     "deploy_running": {
       "message": "The scripts are already being deployed, try again once that finishes."
+    },
+    "mqtt_not_ready": {
+      "message": "The MQTT integration is not available yet."
+    },
+    "host_key_failed": {
+      "message": "The SSH host key of {host} could not be verified: {error}"
+    },
+    "ssh_auth_failed": {
+      "message": "The UNAS at {host} rejected the SSH login: {error}"
+    },
+    "ssh_failed": {
+      "message": "Cannot check the UNAS at {host} over SSH: {error}"
     }
   },
   "entity": {
