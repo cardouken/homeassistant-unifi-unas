@@ -170,6 +170,15 @@
       },
       "curve_target_temp": {
         "default": "mdi:thermometer-check"
+      },
+      "curve_cpu_target": {
+        "default": "mdi:thermometer-check"
+      },
+      "curve_cpu_min_temp": {
+        "default": "mdi:thermometer-low"
+      },
+      "curve_cpu_max_temp": {
+        "default": "mdi:thermometer-high"
       }
     }
   }

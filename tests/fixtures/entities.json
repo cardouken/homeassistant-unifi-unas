@@ -110,6 +110,36 @@
    "suggested_unit": null,
    "unit": null
   },
+  "fan_curve_cpu_max_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_cpu_max_temperature",
+   "icon": "mdi:thermometer-high",
+   "name": "CPU Max Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_cpu_min_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_cpu_min_temperature",
+   "icon": "mdi:thermometer-low",
+   "name": "CPU Min Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_cpu_target": {
+   "device_class": null,
+   "entity_id": "number.unas_cpu_target_temperature",
+   "icon": "mdi:thermometer-check",
+   "name": "CPU Target Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
   "fan_curve_max_fan": {
    "device_class": null,
    "entity_id": "number.unas_max_fan_speed",
@@ -831,6 +861,36 @@
    "state_class": null,
    "suggested_unit": null,
    "unit": null
+  },
+  "fan_curve_cpu_max_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_cpu_max_temperature",
+   "icon": "mdi:thermometer-high",
+   "name": "CPU Max Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_cpu_min_temp": {
+   "device_class": null,
+   "entity_id": "number.unas_cpu_min_temperature",
+   "icon": "mdi:thermometer-low",
+   "name": "CPU Min Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
+  },
+  "fan_curve_cpu_target": {
+   "device_class": null,
+   "entity_id": "number.unas_cpu_target_temperature",
+   "icon": "mdi:thermometer-check",
+   "name": "CPU Target Temperature",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": "°C"
   },
   "fan_curve_max_fan": {
    "device_class": null,

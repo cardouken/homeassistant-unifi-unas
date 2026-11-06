@@ -8,7 +8,10 @@ from homeassistant.components import mqtt
 from .const import get_mqtt_topics
 
 MODES = ("unas_managed", "auto", "target_temp", "set_speed")
-CURVE_KEYS = ("min_temp", "max_temp", "min_fan", "max_fan", "target_temp")
+CURVE_KEYS = (
+    "min_temp", "max_temp", "min_fan", "max_fan", "target_temp",
+    "cpu_target", "cpu_min_temp", "cpu_max_temp",
+)
 
 
 def pwm_to_percent(pwm: int) -> int:

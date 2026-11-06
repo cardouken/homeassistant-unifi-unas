@@ -56,6 +56,32 @@ async def test_controls_follow_the_mode(hass, fan):
     assert state(hass, "select", "response_speed").state == "unavailable"
 
 
+async def test_cpu_controls_follow_the_mode(hass, fan):
+    assert state(hass, "number", "fan_curve_cpu_target").state == "80"
+    assert state(hass, "number", "fan_curve_cpu_min_temp").state == "unavailable"
+    fire(hass, "control/fan/mode", "auto")
+    await settle(hass)
+    assert state(hass, "number", "fan_curve_cpu_target").state == "unavailable"
+    assert state(hass, "number", "fan_curve_cpu_min_temp").state == "70"
+    assert state(hass, "number", "fan_curve_cpu_max_temp").state == "90"
+
+
+async def test_an_inverted_cpu_curve_is_rejected(hass, fan):
+    fire(hass, "control/fan/mode", "auto")
+    await settle(hass)
+    with pytest.raises(ServiceValidationError) as err:
+        await hass.services.async_call(
+            "number", "set_value", {
+                "entity_id": entity_id(hass, "number", "fan_curve_cpu_max_temp"), "value": 70
+            },
+            blocking=True,
+        )
+    assert (err.value.translation_key, err.value.translation_placeholders) == (
+        "temperature_order", {"min": "70", "max": "70"}
+    )
+    assert published(fan) == []
+
+
 async def test_a_legacy_numeric_mode_is_set_speed(hass, fan):
     fire(hass, "control/fan/mode", "153")
     await settle(hass)

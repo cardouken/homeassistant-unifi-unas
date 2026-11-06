@@ -194,7 +194,8 @@ def fire_fan_settings(hass, mode="target_temp"):
     settings = {
         "mode": mode, "curve/min_temp": 40, "curve/max_temp": 50, "curve/min_fan": 51,
         "curve/max_fan": 255, "curve/target_temp": 43, "curve/temp_metric": "avg",
-        "curve/response_speed": "balanced",
+        "curve/response_speed": "balanced", "curve/cpu_target": 80, "curve/cpu_min_temp": 70,
+        "curve/cpu_max_temp": 90,
     }
     for key, value in settings.items():
         fire(hass, f"control/fan/{key}", value)

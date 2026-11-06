@@ -22,6 +22,14 @@ SETTINGS = {
 
 # expected values are the 0.9.7 bash controller's output with its trend history bug fixed
 def test_replay_matches_bash_controller():
+    replay_matches_bash_controller(None)
+
+
+def test_replay_with_a_cool_cpu_is_unchanged():
+    replay_matches_bash_controller(50)
+
+
+def replay_matches_bash_controller(cpu):
     expected = json.loads(FIXTURE.read_text())
     for rows, want in zip(scenarios(), expected):
         hw = {"pwm": 0}
@@ -31,8 +39,8 @@ def test_replay_matches_bash_controller():
             if row["hw"] is not None:
                 hw["pwm"] = row["hw"]
             version += row["sample"]
-            settings = dict(row["settings"])
-            action, got = controller.tick(row["t"], settings, row["temps"], version)
+            settings = dict(fc.DEFAULT_SETTINGS, **row["settings"])
+            action, got = controller.tick(row["t"], settings, row["temps"], version, cpu)
             if action == "write":
                 hw["pwm"] = got
                 assert (got, got) == (pwm, written), n
@@ -58,6 +66,11 @@ def test_invalid_mode_payloads_rejected(payload):
     ("min_fan", "51.0", None),
     ("temp_metric", "min", None),
     ("target_temp", "43; reboot", None),
+    ("cpu_target", "80", 80),
+    ("cpu_min_temp", "70", 70),
+    ("cpu_max_temp", "90", 90),
+    ("cpu_target", "80.5", None),
+    ("cpu_max_temp", "90; reboot", None),
 ])
 def test_setting_validation(key, payload, value):
     assert fc.parse_setting(key, payload) == value
@@ -174,3 +187,89 @@ def test_data_version_keeps_counting_when_the_interval_grows():
     service.monitor_interval = 30
     assert service._data_version(1020) == 3
     assert service._data_version(1040) == 4
+
+
+CPU_SETTINGS = dict(fc.DEFAULT_SETTINGS, **SETTINGS)
+
+
+def test_target_temp_follows_a_hot_cpu():
+    settings = dict(CPU_SETTINGS, mode="target_temp", target_temp=42)
+    plain = fc.Controller(lambda: 0)
+    hot = fc.Controller(lambda: 0)
+    cool = fc.Controller(lambda: 0)
+    for n in range(20):
+        _, base = plain.tick(1000 + n, dict(settings), [35], n + 1)
+        _, with_hot = hot.tick(1000 + n, dict(settings), [35], n + 1, 90)
+        _, with_cool = cool.tick(1000 + n, dict(settings), [35], n + 1, 60)
+        assert with_cool == base
+        assert cool.source == "drives"
+    assert with_hot > base
+    assert hot.source == "cpu"
+
+
+def test_auto_follows_a_hot_cpu():
+    settings = dict(CPU_SETTINGS, mode="auto", cpu_min_temp=70, cpu_max_temp=90)
+    controller = fc.Controller(lambda: 0)
+    action, pwm = controller.tick(1000, dict(settings), [30], 1, 80)
+    assert (action, pwm) == ("write", fc.curve_pwm(80, 70, 90, 64, 255))
+    assert pwm > 64 and controller.source == "cpu"
+    assert controller.tick(1001, dict(settings), [30], 1, 70) == ("write", 64)
+    assert controller.source == "drives"
+    assert controller.tick(1002, dict(settings), [30], 1) == ("write", 64)
+    assert controller.source == "drives"
+
+
+def test_source_is_none_outside_the_curve_modes():
+    controller = fc.Controller(lambda: 0)
+    controller.tick(1000, dict(CPU_SETTINGS, mode="auto"), [30], 1, 90)
+    assert controller.source == "cpu"
+    controller.tick(1001, dict(CPU_SETTINGS, mode="128"), [30], 1, 90)
+    assert controller.source is None
+
+
+def test_cpu_floor_has_hysteresis():
+    failsafe = fc.FailSafe(started=1000)
+
+    def at(cpu):
+        return failsafe.apply(1000, "auto", [40], "write", 100, 100, cpu)
+
+    assert at(89) == (100, None)
+    assert at(90) == (153, None)
+    assert at(94) == (153, None)
+    assert at(95) == (255, "cpu_overheat")
+    assert at(91) == (255, "cpu_overheat")
+    assert at(89) == (153, None)
+    assert at(85) == (153, None)
+    assert at(84) == (100, None)
+
+
+def test_cpu_floor_applies_to_set_speed_and_no_data():
+    failsafe = fc.FailSafe(started=1000)
+    assert failsafe.apply(1000, "50", [40], "write", 50, 50, 91) == (153, None)
+    failsafe = fc.FailSafe(started=1000)
+    assert failsafe.apply(1005, "auto", [], "no_data", None, 60, 91) == (153, None)
+    assert failsafe.apply(1100, "auto", [], "no_data", None, 60, 91) == (
+        255, "no_temperature_data"
+    )
+
+
+def test_cpu_floor_ignores_unas_managed():
+    failsafe = fc.FailSafe(started=1000)
+    assert failsafe.apply(1000, "unas_managed", [40], "managed", None, 90, 99) == (None, None)
+
+
+def test_drive_overheat_wins_over_the_cpu_fault():
+    failsafe = fc.FailSafe(started=1000)
+    assert failsafe.apply(1000, "auto", [63], "write", 100, 100, 96) == (255, "overheat")
+
+
+def test_read_cpu_temp(tmp_path, monkeypatch):
+    path = tmp_path / "temp"
+    monkeypatch.setattr(fc, "CPU_THERMAL_PATH", str(path))
+    assert fc.read_cpu_temp() is None
+    path.write_text("57000\n")
+    assert fc.read_cpu_temp() == 57
+    path.write_text("garbage")
+    assert fc.read_cpu_temp() is None
+    path.write_text("0")
+    assert fc.read_cpu_temp() is None

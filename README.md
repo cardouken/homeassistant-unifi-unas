@@ -81,10 +81,12 @@ entity settings if you want them.
 
 - **Fan Mode** (Select) - UNAS Managed, Custom Curve, Target Temperature, or Set Speed
 - **Target Temperature** (Number) - Desired drive temperature for Target Temperature mode (20-50°C)
+- **CPU Target Temperature** (Number) - Desired CPU temperature for Target Temperature mode (60-90°C, default 80°C)
 - **Temperature Metric** (Select) - Max (hottest drive) or Avg (average) for Target Temperature mode
 - **Response Speed** (Select) - Relaxed, Balanced, or Aggressive for Target Temperature mode
 - **Fan Speed** (Number) - Manual speed for Set Speed mode (0-100%); in the other modes it shows the current speed
 - **Min/Max Temperature** (Numbers) - Temperature range for Custom Curve mode (20-60°C)
+- **CPU Min/Max Temperature** (Numbers) - CPU temperature range for Custom Curve mode (50-90°C, default 70-90°C)
 - **Min/Max Fan Speed** (Numbers) - Fan speed range/limits (0-100%)
 
 > **Note:** Controls are context-sensitive—only settings relevant to your selected fan mode are adjustable.
@@ -279,6 +281,9 @@ min ┤─╱
 
 **Configure via:** Settings → Devices & Services → UniFi UNAS → Device → Adjust the four curve parameters
 
+The CPU has its own band (CPU Min/Max Temperature) mapped onto the same Min/Max Fan Speed. The fans follow whichever of
+the drive curve and the CPU curve asks for more.
+
 **Example presets:**
 
 | Preset     | Min Temp | Max Temp | Min Fan | Max Fan |
@@ -299,7 +304,8 @@ when needed and backs off when stable.
 
 | Setting                | Description                                                   |
 |------------------------|---------------------------------------------------------------|
-| **Target Temperature** | The temperature you want to maintain (20-50°C, default: 42°C) |
+| **Target Temperature** | The drive temperature you want to maintain (20-50°C, default: 42°C) |
+| **CPU Target Temperature** | CPU temperature to hold (60-90°C, default: 80°C); a second controller runs on the CPU and the fans follow whichever controller asks for more. Above 90°C the safety floor takes over |
 | **Temperature Metric** | **Max** = hottest drive, **Average** = average of all drives  |
 | **Response Speed**     | How aggressively the controller reacts (see below)            |
 | **Min/Max Fan Speed**  | Limits for the controller (it won't go outside this range)    |
@@ -332,6 +338,11 @@ change, depending on your environment and targets.
 ### 4. Set Speed
 
 Lock fans to a fixed speed (0-100%). Use the Fan Speed slider to set the desired speed.
+
+### CPU safety floor
+
+In every mode except UNAS Managed the fans never run below 60% at 90°C CPU and 100% at 95°C (each step releases 5°C
+lower), because the UNAS kernel does not throttle the CPU and powers the NAS off at 105°C.
 
 ## Troubleshooting
 

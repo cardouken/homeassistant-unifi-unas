@@ -55,6 +55,10 @@ STATE_REPUBLISH_INTERVAL = 30
 # uhwd keeps writing its own PWM for a while after a profile change
 REASSERT_INTERVAL = 0.2
 HEARTBEAT_INTERVAL = 600
+CPU_THERMAL_PATH = "/sys/class/thermal/thermal_zone0/temp"
+# stepped floor the mode output can never go below; each step releases 5°C under its threshold
+CPU_FLOOR_STEPS = ((90, 153), (95, 255))
+CPU_FLOOR_RELEASE = 5
 
 DEFAULT_SETTINGS = {
     "mode": "unas_managed",
@@ -66,6 +70,9 @@ DEFAULT_SETTINGS = {
     "temp_metric": "max",
     "response_speed": "balanced",
     "speed": 128,
+    "cpu_target": 80,
+    "cpu_min_temp": 70,
+    "cpu_max_temp": 90,
 }
 SETTING_TOPICS = {
     "mode": "mode",
@@ -77,8 +84,14 @@ SETTING_TOPICS = {
     "curve/target_temp": "target_temp",
     "curve/temp_metric": "temp_metric",
     "curve/response_speed": "response_speed",
+    "curve/cpu_target": "cpu_target",
+    "curve/cpu_min_temp": "cpu_min_temp",
+    "curve/cpu_max_temp": "cpu_max_temp",
 }
-INT_SETTINGS = ("min_temp", "max_temp", "min_fan", "max_fan", "target_temp")
+INT_SETTINGS = (
+    "min_temp", "max_temp", "min_fan", "max_fan", "target_temp",
+    "cpu_target", "cpu_min_temp", "cpu_max_temp",
+)
 MODE_PATTERN = re.compile(r"unas_managed|auto|target_temp|set_speed|[0-9]{1,3}")
 # before the speed topic, Set Speed was the PWM written into the mode topic
 LEGACY_SPEED_MODE = re.compile(r"[0-9]{1,3}")
@@ -125,6 +138,70 @@ def curve_pwm(temp, min_temp, max_temp, min_fan, max_fan):
     return int(min_fan + (temp - min_temp) * (max_fan - min_fan) / (max_temp - min_temp))
 
 
+def pi_step(state, now, temp, target, min_fan, max_fan, accum_mult, speed_mult):
+    max_integral = max_fan - min_fan
+    error = rounded(temp - target, 1)
+
+    if state.last_time == 0:
+        dt = 1
+    else:
+        dt = min(max(now - state.last_time, 1), 10)
+
+    p_term = int(rounded(KP * error, 0))
+
+    if not (state.last_pwm >= max_fan and error > 0):
+        if error > 0:
+            integral = state.integral + KI * error * dt * accum_mult
+        else:
+            integral = state.integral + KI * error * dt * speed_mult
+        if integral > max_integral:
+            integral = max_integral
+        if integral < 0:
+            integral = 0
+        state.integral = rounded(integral, 2)
+
+    pwm = int(rounded(min_fan + p_term + state.integral, 0))
+    if state.last_pwm > 0:
+        max_change = MAX_RATE * dt
+        change = pwm - state.last_pwm
+        if change > max_change:
+            pwm = state.last_pwm + max_change
+        if change < -max_change:
+            pwm = state.last_pwm - max_change
+    if pwm < min_fan:
+        pwm = min_fan
+    if pwm > max_fan:
+        pwm = max_fan
+
+    state.last_pwm = pwm
+    state.last_time = now
+    return pwm
+
+
+class CpuPI:
+    def __init__(self):
+        self.integral = 0.0
+        self.last_pwm = 0
+        self.last_time = 0
+        self.prev_target = None
+
+    def reset(self):
+        self.integral = 0.0
+        self.last_pwm = 0
+        self.last_time = 0
+
+    def step(self, now, temp, settings):
+        target = settings["cpu_target"]
+        if self.prev_target is not None and target != self.prev_target and temp < target:
+            self.integral = rounded(self.integral * INTEGRAL_REDUCE_FACTOR, 2)
+        self.prev_target = target
+        speed_mult = RESPONSE_MULTIPLIERS.get(settings["response_speed"], 1.0)
+        return pi_step(
+            self, now, float(temp), target, settings["min_fan"], settings["max_fan"],
+            speed_mult, speed_mult,
+        )
+
+
 class Controller:
     def __init__(self, read_hw_pwm):
         self.read_hw_pwm = read_hw_pwm
@@ -138,13 +215,17 @@ class Controller:
         self.prev_target = None
         self.saved_integral = None
         self.saved_time = 0
+        self.cpu = CpuPI()
+        self.source = None
 
     def reset_pi(self):
         self.integral = 0.0
         self.last_pwm = 0
         self.last_time = 0
+        self.cpu.reset()
 
-    def tick(self, now, settings, temps, data_version):
+    def tick(self, now, settings, temps, data_version, cpu=None):
+        self.source = None
         self._target_change(settings, temps)
         self._mode_transition(now, settings, temps)
         mode = settings["mode"]
@@ -154,15 +235,32 @@ class Controller:
         if mode == "auto":
             if not temps:
                 return "no_data", None
-            return "write", curve_pwm(
+            pwm = curve_pwm(
                 temps[0], settings["min_temp"], settings["max_temp"],
                 settings["min_fan"], settings["max_fan"],
             )
+            self.source = "drives"
+            if cpu is not None:
+                cpu_pwm = curve_pwm(
+                    cpu, settings["cpu_min_temp"], settings["cpu_max_temp"],
+                    settings["min_fan"], settings["max_fan"],
+                )
+                if cpu_pwm > pwm:
+                    pwm = cpu_pwm
+                    self.source = "cpu"
+            return "write", pwm
         if mode == "target_temp":
             if not temps:
                 return "no_data", None
             temp = metric_value(temps, settings["temp_metric"])
-            return "write", self._pi(now, temp, settings, data_version)
+            pwm = self._pi(now, temp, settings, data_version)
+            self.source = "drives"
+            if cpu is not None:
+                cpu_pwm = self.cpu.step(now, cpu, settings)
+                if cpu_pwm > pwm:
+                    pwm = cpu_pwm
+                    self.source = "cpu"
+            return "write", pwm
         if mode.isdigit() and int(mode) <= 255:
             return "write", int(mode)
 
@@ -238,48 +336,13 @@ class Controller:
             self.trend_mult = 1.5
 
     def _pi(self, now, temp, settings, data_version):
-        min_fan = settings["min_fan"]
-        max_fan = settings["max_fan"]
-        max_integral = max_fan - min_fan
-        error = rounded(temp - settings["target_temp"], 1)
-
-        if self.last_time == 0:
-            dt = 1
-        else:
-            dt = min(max(now - self.last_time, 1), 10)
-
-        p_term = int(rounded(KP * error, 0))
         self._update_trend(temp, data_version)
         speed_mult = RESPONSE_MULTIPLIERS.get(settings["response_speed"], 1.0)
         accum_mult = rounded(self.trend_mult * speed_mult, 2)
-
-        if not (self.last_pwm >= max_fan and error > 0):
-            if error > 0:
-                integral = self.integral + KI * error * dt * accum_mult
-            else:
-                integral = self.integral + KI * error * dt * speed_mult
-            if integral > max_integral:
-                integral = max_integral
-            if integral < 0:
-                integral = 0
-            self.integral = rounded(integral, 2)
-
-        pwm = int(rounded(min_fan + p_term + self.integral, 0))
-        if self.last_pwm > 0:
-            max_change = MAX_RATE * dt
-            change = pwm - self.last_pwm
-            if change > max_change:
-                pwm = self.last_pwm + max_change
-            if change < -max_change:
-                pwm = self.last_pwm - max_change
-        if pwm < min_fan:
-            pwm = min_fan
-        if pwm > max_fan:
-            pwm = max_fan
-
-        self.last_pwm = pwm
-        self.last_time = now
-        return pwm
+        return pi_step(
+            self, now, temp, settings["target_temp"], settings["min_fan"], settings["max_fan"],
+            accum_mult, speed_mult,
+        )
 
 
 class FailSafe:
@@ -287,8 +350,9 @@ class FailSafe:
         self.last_valid = started
         self.ramp_from = None
         self.overheat = False
+        self.cpu_level = 0
 
-    def apply(self, now, mode, temps, action, pwm, held_pwm):
+    def apply(self, now, mode, temps, action, pwm, held_pwm, cpu=None):
         if temps:
             self.last_valid = now
             self.ramp_from = None
@@ -297,6 +361,18 @@ class FailSafe:
                 self.overheat = True
             elif hottest < OVERHEAT_RELEASE:
                 self.overheat = False
+
+        if cpu is not None:
+            while (
+                self.cpu_level < len(CPU_FLOOR_STEPS)
+                and cpu >= CPU_FLOOR_STEPS[self.cpu_level][0]
+            ):
+                self.cpu_level += 1
+            while (
+                self.cpu_level > 0
+                and cpu < CPU_FLOOR_STEPS[self.cpu_level - 1][0] - CPU_FLOOR_RELEASE
+            ):
+                self.cpu_level -= 1
 
         if action == "managed":
             return None, None
@@ -315,6 +391,13 @@ class FailSafe:
             else:
                 ramp = (missing_for - NO_DATA_HOLD) / (NO_DATA_FULL - NO_DATA_HOLD)
                 pwm = int(self.ramp_from + (FULL_PWM - self.ramp_from) * ramp)
+
+        if self.cpu_level:
+            floor = CPU_FLOOR_STEPS[self.cpu_level - 1][1]
+            if pwm is None or pwm < floor:
+                pwm = floor
+            if floor == FULL_PWM and fault is None:
+                fault = "cpu_overheat"
 
         if self.overheat:
             return FULL_PWM, "overheat"
@@ -365,6 +448,14 @@ def read_temps():
     if not temps:
         temps = valid_temps(smartctl_temps())
     return temps
+
+
+def read_cpu_temp():
+    try:
+        temp = int(Path(CPU_THERMAL_PATH).read_text().strip()) // 1000
+    except (OSError, ValueError):
+        return None
+    return temp if 1 <= temp <= 150 else None
 
 
 def pwm_channels():
@@ -444,6 +535,7 @@ class FanService:
         self.failsafe = FailSafe(int(time.time()))
         self.held_pwm = read_hw_pwm()
         self.temps = []
+        self.cpu_temp = None
         self.last_poll = None
         self.last_state = None
         self.last_state_at = 0
@@ -529,6 +621,8 @@ class FanService:
             "mode": mode,
             "pwm": pwm,
             "temps": temps,
+            "cpu": self.cpu_temp,
+            "source": self.controller.source,
             "fault": fault,
             "target": settings["target_temp"] if mode == "target_temp" else None,
             "integral": self.controller.integral if mode == "target_temp" else None,
@@ -542,10 +636,14 @@ class FanService:
 
         if summary != self.last_log or now - self.last_log_at >= HEARTBEAT_INTERVAL:
             temps_text = ",".join(str(t) for t in temps) if temps else "none"
+            cpu_text = f" cpu {self.cpu_temp}°C" if self.cpu_temp is not None else ""
             if action == "managed":
-                line = f"UNAS managed, drives [{temps_text}]°C"
+                line = f"UNAS managed, drives [{temps_text}]°C{cpu_text}"
             else:
-                line = f"{mode}: drives [{temps_text}]°C -> {pwm} PWM ({pwm * 100 // 255}%)"
+                line = (
+                    f"{mode}: drives [{temps_text}]°C{cpu_text}"
+                    f" -> {pwm} PWM ({pwm * 100 // 255}%)"
+                )
                 if mode == "target_temp" and temps:
                     line += (
                         f", {metric_value(temps, settings['temp_metric'])}°C"
@@ -590,19 +688,22 @@ class FanService:
             now = int(time.time())
             if self.last_poll is None or time.monotonic() - self.last_poll >= TEMP_POLL_INTERVAL:
                 self.temps = read_temps()
+                self.cpu_temp = read_cpu_temp()
                 self.last_poll = time.monotonic()
 
             with self.lock:
                 settings = controller_settings(self.settings)
             mode_before = settings["mode"]
-            action, pwm = self.controller.tick(now, settings, self.temps, self._data_version(now))
+            action, pwm = self.controller.tick(
+                now, settings, self.temps, self._data_version(now), self.cpu_temp
+            )
             if settings["mode"] != mode_before:
                 with self.lock:
                     self.settings["mode"] = settings["mode"]
                     save_settings(self.settings)
 
             pwm, fault = self.failsafe.apply(
-                now, settings["mode"], self.temps, action, pwm, self.held_pwm
+                now, settings["mode"], self.temps, action, pwm, self.held_pwm, self.cpu_temp
             )
             if pwm is not None:
                 self._write_pwm(pwm)

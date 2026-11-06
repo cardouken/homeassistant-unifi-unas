@@ -65,7 +65,7 @@ def test_only_missing_settings_are_republished(service):
     assert f"{fc.MQTT_FAN_CONTROL}/curve/target_temp" not in published
     assert published[f"{fc.MQTT_FAN_CONTROL}/curve/min_fan"] == ("64", True)
     assert published[f"{fc.MQTT_FAN_CONTROL}/speed"] == ("128", True)
-    assert len(published) == 7
+    assert len(published) == 10
 
 
 def test_legacy_speed_mode_moves_to_the_speed_topic(service):

@@ -26,6 +26,9 @@ FAN_CURVE_PARAMS = tuple(
         ("min_fan", 0, 100, "%"),
         ("max_fan", 1, 100, "%"),
         ("target_temp", 20, 50, "°C"),
+        ("cpu_target", 60, 90, "°C"),
+        ("cpu_min_temp", 50, 90, "°C"),
+        ("cpu_max_temp", 60, 90, "°C"),
     )
 )
 FAN_SPEED = NumberEntityDescription(
@@ -33,7 +36,11 @@ FAN_SPEED = NumberEntityDescription(
     native_step=1, native_unit_of_measurement="%", mode=NumberMode.SLIDER,
 )
 FAN_PARAMS = ("min_fan", "max_fan")
-CURVE_ORDER = (("min_temp", "max_temp", "temperature_order"), ("min_fan", "max_fan", "fan_order"))
+CURVE_ORDER = (
+    ("min_temp", "max_temp", "temperature_order"),
+    ("min_fan", "max_fan", "fan_order"),
+    ("cpu_min_temp", "cpu_max_temp", "temperature_order"),
+)
 # which fan modes each curve parameter applies to
 CURVE_MODES = {
     "min_temp": ("auto",),
@@ -41,6 +48,9 @@ CURVE_MODES = {
     "min_fan": ("auto", "target_temp"),
     "max_fan": ("auto", "target_temp"),
     "target_temp": ("target_temp",),
+    "cpu_target": ("target_temp",),
+    "cpu_min_temp": ("auto",),
+    "cpu_max_temp": ("auto",),
 }
 MODE_ICONS = {"unas_managed": "mdi:fan-off", "auto": "mdi:fan-auto", "target_temp": "mdi:fan-auto"}
 

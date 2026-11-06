@@ -393,6 +393,15 @@
       },
       "curve_target_temp": {
         "name": "Target Temperature"
+      },
+      "curve_cpu_target": {
+        "name": "CPU Target Temperature"
+      },
+      "curve_cpu_min_temp": {
+        "name": "CPU Min Temperature"
+      },
+      "curve_cpu_max_temp": {
+        "name": "CPU Max Temperature"
       }
     }
   }
