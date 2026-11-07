@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
@@ -161,3 +163,37 @@ async def test_fan_curve_sensor(hass, fan):
     fire(hass, "control/fan/curve/max_temp", "40")
     await settle(hass)
     assert state(hass, "sensor", "fan_curve_viz").attributes["curve_points"][15] == [45, 100]
+
+
+def fan_state_payload(fault, source, cpu):
+    return json.dumps(
+        {"mode": "target_temp", "pwm": 71, "fault": fault, "source": source, "cpu": cpu}
+    )
+
+
+async def test_fan_fault_sensor(hass, fan):
+    assert state(hass, "sensor", "fan_fault").state == "unavailable"
+    fire(hass, "fan/state", fan_state_payload(None, "drives", 57))
+    await settle(hass)
+    sensor = state(hass, "sensor", "fan_fault")
+    assert sensor.state == "none"
+    assert sensor.attributes["source"] == "drives"
+    assert sensor.attributes["cpu_temperature"] == 57
+    fire(hass, "fan/state", fan_state_payload("cpu_overheat", "cpu", 96))
+    await settle(hass)
+    assert state(hass, "sensor", "fan_fault").state == "cpu_overheat"
+    fire(hass, "fan/state", fan_state_payload("something_new", "cpu", 96))
+    await settle(hass)
+    assert state(hass, "sensor", "fan_fault").state == "unknown"
+    fire(hass, "fan/availability", "offline")
+    await settle(hass)
+    assert state(hass, "sensor", "fan_fault").state == "unavailable"
+
+
+async def test_fan_state_garbage_is_ignored(hass, fan):
+    fire(hass, "fan/state", "{not json")
+    await settle(hass)
+    assert state(hass, "sensor", "fan_fault").state == "unavailable"
+    fire(hass, "fan/state", fan_state_payload("overheat", "drives", None))
+    await settle(hass)
+    assert state(hass, "sensor", "fan_fault").state == "overheat"

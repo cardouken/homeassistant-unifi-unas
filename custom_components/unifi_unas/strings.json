@@ -231,6 +231,15 @@
       "fan_curve": {
         "name": "Fan Curve"
       },
+      "fan_fault": {
+        "name": "Fan Control Fault",
+        "state": {
+          "none": "None",
+          "overheat": "Drive overheat",
+          "cpu_overheat": "CPU overheat",
+          "no_temperature_data": "No temperature data"
+        }
+      },
       "pool_usage": {
         "name": "Storage Pool {pool} Usage"
       },

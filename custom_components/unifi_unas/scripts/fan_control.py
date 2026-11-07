@@ -451,11 +451,10 @@ def read_temps():
 
 
 def read_cpu_temp():
-    try:
-        temp = int(Path(CPU_THERMAL_PATH).read_text().strip()) // 1000
-    except (OSError, ValueError):
-        return None
-    return temp if 1 <= temp <= 150 else None
+    temp = int(Path(CPU_THERMAL_PATH).read_text().strip()) // 1000
+    if not 1 <= temp <= 150:
+        raise ValueError(f"out of range: {temp}")
+    return temp
 
 
 def pwm_channels():
@@ -536,6 +535,7 @@ class FanService:
         self.held_pwm = read_hw_pwm()
         self.temps = []
         self.cpu_temp = None
+        self.cpu_error = None
         self.last_poll = None
         self.last_state = None
         self.last_state_at = 0
@@ -657,6 +657,20 @@ class FanService:
             self.last_log = summary
             self.last_log_at = now
 
+    def _poll_cpu(self):
+        try:
+            temp = read_cpu_temp()
+        except (OSError, ValueError) as e:
+            error = f"{type(e).__name__}: {e}"
+            if self.cpu_error != error:
+                logger.error("CPU temperature unavailable (%s), following the drives only", error)
+                self.cpu_error = error
+            return None
+        if self.cpu_error:
+            logger.info("CPU temperature readings recovered")
+            self.cpu_error = None
+        return temp
+
     def _data_version(self, now):
         # a counter, not now // interval: that would go backwards when the interval grows
         if self.data_version_at is None or now - self.data_version_at >= self.monitor_interval:
@@ -688,7 +702,7 @@ class FanService:
             now = int(time.time())
             if self.last_poll is None or time.monotonic() - self.last_poll >= TEMP_POLL_INTERVAL:
                 self.temps = read_temps()
-                self.cpu_temp = read_cpu_temp()
+                self.cpu_temp = self._poll_cpu()
                 self.last_poll = time.monotonic()
 
             with self.lock:

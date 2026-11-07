@@ -58,7 +58,7 @@ Monitoring and fan control for UniFi UNAS with native Home Assistant integration
 ### Sensors
 
 - **System** - CPU temperature & usage, memory usage, disk I/O throughput, fan speed (PWM & percentage), uptime, OS
-  version
+  version, fan control fault (none, drive overheat, CPU overheat, no temperature data)
 - **Drives (HDD)** - Temperature, SMART health status, model, serial, firmware, RPM, power-on hours, bad sectors
 - **Drives (NVMe)** - Temperature, SMART health, percentage used (wear), available spare, media errors, unsafe shutdowns
 - **Storage** - Pool usage, size, available space, status, RAID level
@@ -411,7 +411,7 @@ unas/{id}/
 ├── availability          # "online" or "offline"
 ├── fan/
 │   ├── availability      # fan control "online" or "offline"
-│   └── state             # JSON: mode, PWM, drive temps, fault
+│   └── state             # JSON: mode, PWM, drive temps, CPU temp, source, fault
 ├── system/               # CPU, memory, disk I/O, fan, uptime
 ├── hdd/{bay}/            # Per-drive SMART data
 ├── nvme/{slot}/          # NVMe drive data

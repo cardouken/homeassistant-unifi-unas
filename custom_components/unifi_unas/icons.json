@@ -37,6 +37,9 @@
       "fan_curve": {
         "default": "mdi:chart-line"
       },
+      "fan_fault": {
+        "default": "mdi:fan-alert"
+      },
       "pool_usage": {
         "default": "mdi:harddisk"
       },

@@ -28,6 +28,7 @@ Topic Pattern                        → Internal Key                   → Type
 ─────────────────────────────────────────────────────────────────────────────────
 unas/availability                    → _status                        → status
 unas/fan/availability                → _fan_status                    → status
+unas/fan/state                       → fan_state                      → dict
 unas/inventory                       → inventory                      → {bays, nvme, pools, shares}
 unas/system/{metric}                 → unas_{metric}                  → value
 unas/hdd/{bay}/{metric}              → unas_hdd_{bay}_{metric}        → value
@@ -161,6 +162,8 @@ class UNASMQTTClient:
             if item == "availability":
                 self._fan_status = payload
                 self._schedule_refresh()
+            elif item == "state":
+                self._store_fan_state(payload)
 
         # unas/nfs/mounts or unas/nfs/clients
         elif category == "nfs":
@@ -243,6 +246,24 @@ class UNASMQTTClient:
 
         self._data[key] = value
         self._data_timestamps[key] = datetime.now()
+        self._last_update = datetime.now()
+        self._schedule_refresh()
+
+    def _store_fan_state(self, payload: str) -> None:
+        if not payload:
+            if self._data.pop("fan_state", None) is not None:
+                self._data_timestamps.pop("fan_state", None)
+                self._schedule_refresh()
+            return
+        try:
+            state = json.loads(payload)
+        except (ValueError, TypeError):
+            _LOGGER.debug("Ignoring an invalid fan state: %s", payload[:200])
+            return
+        if not isinstance(state, dict):
+            return
+        self._data["fan_state"] = state
+        self._data_timestamps["fan_state"] = datetime.now()
         self._last_update = datetime.now()
         self._schedule_refresh()
 

@@ -266,10 +266,13 @@ def test_drive_overheat_wins_over_the_cpu_fault():
 def test_read_cpu_temp(tmp_path, monkeypatch):
     path = tmp_path / "temp"
     monkeypatch.setattr(fc, "CPU_THERMAL_PATH", str(path))
-    assert fc.read_cpu_temp() is None
+    with pytest.raises(OSError):
+        fc.read_cpu_temp()
     path.write_text("57000\n")
     assert fc.read_cpu_temp() == 57
     path.write_text("garbage")
-    assert fc.read_cpu_temp() is None
+    with pytest.raises(ValueError):
+        fc.read_cpu_temp()
     path.write_text("0")
-    assert fc.read_cpu_temp() is None
+    with pytest.raises(ValueError):
+        fc.read_cpu_temp()

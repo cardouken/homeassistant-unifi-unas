@@ -67,6 +67,13 @@ def _sensor(key: str, translation_key: str | None = None, **kwargs: Any) -> Sens
     return SensorEntityDescription(key=key, translation_key=translation_key or key, **kwargs)
 
 
+FAN_FAULTS = ("none", "overheat", "cpu_overheat", "no_temperature_data")
+FAN_FAULT = _sensor(
+    "fan_fault", device_class=SensorDeviceClass.ENUM, options=list(FAN_FAULTS),
+    entity_category=DIAGNOSTIC,
+)
+
+
 # key is the MQTT key without the unas_ prefix
 SYSTEM_SENSORS = (
     _sensor("cpu_temp", **TEMPERATURE),
@@ -261,6 +268,7 @@ async def async_setup_entry(
             for d in SYSTEM_SENSORS if d.key not in excluded
         ),
         UNASFanCurveSensor(coordinator),
+        UNASFanFaultSensor(coordinator),
     ])
 
     @callback
@@ -447,6 +455,34 @@ class UNASFanCurveSensor(UNASEntity, SensorEntity):
             ],
             "curve_formula": f"Linear: {min_temp}°C→{min_fan_pct}%, {max_temp}°C→{max_fan_pct}%",
         }
+
+
+class UNASFanFaultSensor(UNASEntity, SensorEntity):
+    coordinator: UNASDataCoordinator
+
+    def __init__(self, coordinator: UNASDataCoordinator) -> None:
+        super().__init__(coordinator, "fan_fault", FAN_FAULT)
+
+    @property
+    def available(self) -> bool:
+        client = self.coordinator.mqtt_client
+        return (
+            client.fan_available()
+            and "fan_state" in self.coordinator.data
+            and client.is_fresh("fan_state")
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        fault = self.coordinator.data.get("fan_state", {}).get("fault")
+        if fault is None:
+            return "none"
+        return fault if fault in FAN_FAULTS else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        state = self.coordinator.data.get("fan_state", {})
+        return {"source": state.get("source"), "cpu_temperature": state.get("cpu")}
 
 
 def curve_pwm(

@@ -105,3 +105,15 @@ def test_out_of_range_pwm_is_never_written(service, tmp_path, caplog):
         service._write_pwm(pwm)
     assert (tmp_path / "pwm1").read_text() == "64"
     assert sum("Refusing to write" in r.message for r in caplog.records) == 2
+
+
+def test_cpu_read_failure_is_logged_once(service, tmp_path, monkeypatch, caplog):
+    path = tmp_path / "cpu_temp"
+    monkeypatch.setattr(fc, "CPU_THERMAL_PATH", str(path))
+    caplog.set_level(logging.INFO)
+    assert [service._poll_cpu() for _ in range(3)] == [None, None, None]
+    assert len([r for r in caplog.records if "CPU temperature unavailable" in r.message]) == 1
+    path.write_text("57000")
+    assert service._poll_cpu() == 57
+    assert service._poll_cpu() == 57
+    assert len([r for r in caplog.records if "recovered" in r.message]) == 1

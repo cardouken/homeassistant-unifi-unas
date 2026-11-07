@@ -118,7 +118,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_cpu_min_temp": {
    "device_class": null,
@@ -128,7 +128,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_cpu_target": {
    "device_class": null,
@@ -138,7 +138,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_max_fan": {
    "device_class": null,
@@ -158,7 +158,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_min_fan": {
    "device_class": null,
@@ -178,7 +178,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_target_temp": {
    "device_class": null,
@@ -188,13 +188,23 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_viz": {
    "device_class": null,
    "entity_id": "sensor.unas_fan_curve",
    "icon": "mdi:chart-line",
    "name": "Fan Curve",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_fault": {
+   "device_class": "enum",
+   "entity_id": "sensor.unas_fan_control_fault",
+   "icon": "mdi:fan-alert",
+   "name": "Fan Control Fault",
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
@@ -298,7 +308,7 @@
    "precision": 0,
    "state_class": "measurement",
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "unas_cpu_usage": {
    "device_class": null,
@@ -438,7 +448,7 @@
    "precision": 0,
    "state_class": "measurement",
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "unas_hdd_1_total_size": {
    "device_class": "data_size",
@@ -578,7 +588,7 @@
    "precision": 0,
    "state_class": "measurement",
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "unas_nvme_0_total_size": {
    "device_class": "data_size",
@@ -870,7 +880,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_cpu_min_temp": {
    "device_class": null,
@@ -880,7 +890,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_cpu_target": {
    "device_class": null,
@@ -890,7 +900,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_max_fan": {
    "device_class": null,
@@ -910,7 +920,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_min_fan": {
    "device_class": null,
@@ -930,7 +940,7 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_target_temp": {
    "device_class": null,
@@ -940,13 +950,23 @@
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "fan_curve_viz": {
    "device_class": null,
    "entity_id": "sensor.unas_fan_curve",
    "icon": "mdi:chart-line",
    "name": "Fan Curve",
+   "precision": null,
+   "state_class": null,
+   "suggested_unit": null,
+   "unit": null
+  },
+  "fan_fault": {
+   "device_class": "enum",
+   "entity_id": "sensor.unas_fan_control_fault",
+   "icon": "mdi:fan-alert",
+   "name": "Fan Control Fault",
    "precision": null,
    "state_class": null,
    "suggested_unit": null,
@@ -1050,7 +1070,7 @@
    "precision": 0,
    "state_class": "measurement",
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "unas_cpu_usage": {
    "device_class": null,
@@ -1180,7 +1200,7 @@
    "precision": 0,
    "state_class": "measurement",
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "unas_hdd_1_total_size": {
    "device_class": "data_size",
@@ -1310,7 +1330,7 @@
    "precision": 0,
    "state_class": "measurement",
    "suggested_unit": null,
-   "unit": "°C"
+   "unit": "\u00b0C"
   },
   "unas_nvme_0_total_size": {
    "device_class": "data_size",
