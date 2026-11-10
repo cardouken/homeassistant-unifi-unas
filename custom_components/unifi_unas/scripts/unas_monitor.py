@@ -599,8 +599,8 @@ class UNASMonitor:
             read_bytes = (read_end - read_start) * 512
             write_bytes = (write_end - write_start) * 512
 
-            read_mbps = (read_bytes / time_delta) / (1024 * 1024)
-            write_mbps = (write_bytes / time_delta) / (1024 * 1024)
+            read_mbps = (read_bytes / time_delta) / 1_000_000
+            write_mbps = (write_bytes / time_delta) / 1_000_000
 
             return round(read_mbps, 2), round(write_mbps, 2)
 
@@ -618,8 +618,8 @@ class UNASMonitor:
         if time_delta <= 0:
             return 0.0, 0.0
 
-        read_mbps = (read_bytes / time_delta) / (1024 * 1024)
-        write_mbps = (write_bytes / time_delta) / (1024 * 1024)
+        read_mbps = (read_bytes / time_delta) / 1_000_000
+        write_mbps = (write_bytes / time_delta) / 1_000_000
 
         return round(read_mbps, 2), round(write_mbps, 2)
 
