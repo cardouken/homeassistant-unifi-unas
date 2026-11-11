@@ -187,3 +187,63 @@ def test_product_name_comes_from_the_unifi_device_table(tmp_path, monkeypatch):
 def test_missing_device_table_gives_no_product(tmp_path, monkeypatch):
     monkeypatch.setattr(um, "UIDB_FILE", tmp_path / "missing.json")
     assert um.product_info("ea51") == {}
+
+
+
+@pytest.fixture
+def net(tmp_path, monkeypatch):
+    sysfs = tmp_path / "net"
+    sysfs.mkdir()
+    (sysfs / "bonding_masters").write_text("lag0\n")
+    monkeypatch.setattr(um, "NET_SYSFS", sysfs)
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(um.time, "monotonic", lambda: clock.now)
+
+    def counters(iface, rx, tx, advance=0, physical=True):
+        stats = sysfs / iface / "statistics"
+        stats.mkdir(parents=True, exist_ok=True)
+        if physical:
+            (sysfs / iface / "device").mkdir(exist_ok=True)
+        (stats / "rx_bytes").write_text(f"{rx}\n")
+        (stats / "tx_bytes").write_text(f"{tx}\n")
+        clock.now += advance
+
+    counters("enp0s1", 0, 0)
+    counters("enp0s2", 0, 0)
+    counters("lag0", 0, 0, physical=False)
+    counters("lo", 0, 0, physical=False)
+    return counters
+
+
+def test_network_rate_sums_the_physical_nics(net):
+    mon = um.UNASMonitor(mqtt_enabled=False)
+    net("lag0", 9_000_000_000, 9_000_000_000, physical=False)
+    net("lo", 9_000_000_000, 9_000_000_000, physical=False)
+    net("enp0s1", 50_000_000, 0)
+    net("enp0s2", 200_000_000, 50_000_000, advance=5)
+    assert mon.get_network_throughput() == (50.0, 10.0)
+
+
+def test_network_rate_starts_over_when_a_nic_appears(net):
+    mon = um.UNASMonitor(mqtt_enabled=False)
+    net("enx0", 1_000_000, 1_000_000, advance=1)
+    assert mon.get_network_throughput() == (None, None)
+    net("enx0", 3_000_000, 2_000_000, advance=1)
+    assert mon.get_network_throughput() == (2.0, 1.0)
+
+
+def test_network_rate_skips_a_counter_reset(net):
+    net("enp0s2", 5_000_000, 5_000_000)
+    mon = um.UNASMonitor(mqtt_enabled=False)
+    net("enp0s2", 1_000, 1_000, advance=5)
+    assert mon.get_network_throughput() == (None, None)
+    net("enp0s2", 5_001_000, 1_000, advance=5)
+    assert mon.get_network_throughput() == (1.0, 0.0)
+
+
+def test_no_network_rate_without_a_physical_nic(net, tmp_path, monkeypatch):
+    sysfs = tmp_path / "virtual"
+    (sysfs / "lo" / "statistics").mkdir(parents=True)
+    monkeypatch.setattr(um, "NET_SYSFS", sysfs)
+    mon = um.UNASMonitor(mqtt_enabled=False)
+    assert mon.get_network_throughput() == (None, None)

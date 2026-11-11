@@ -37,6 +37,7 @@ SHARE_CACHE_TTL = 300
 DEVICE_INFO_TTL = 3600
 # UniFi's own device table, maps the sysid to the product name ("UNAS Pro") and SKU
 UIDB_FILE = Path('/usr/share/unifi-core/app/data/uidb.json')
+NET_SYSFS = Path('/sys/class/net')
 HEARTBEAT_INTERVAL = 600
 _UNSET = object()
 
@@ -161,6 +162,9 @@ class UNASMonitor:
         self.prev_disk_read = None
         self.prev_disk_write = None
         self.prev_time = None
+        self.prev_net = None
+        # baseline, so the first cycle already has a rate
+        self.get_network_throughput()
 
         try:
             with open('/etc/machine-id') as f:
@@ -498,6 +502,9 @@ class UNASMonitor:
             ).strip()
         data['cpu_usage'] = self.get_cpu_usage()
         data['disk_read'], data['disk_write'] = self.get_disk_throughput()
+        rx, tx = self.get_network_throughput()
+        if rx is not None:
+            data['network_rx'], data['network_tx'] = rx, tx
 
         with open('/proc/meminfo') as f:
             meminfo = {
@@ -567,6 +574,32 @@ class UNASMonitor:
             return 0
 
         return int(100 * (1 - delta_idle / delta_total))
+
+    def get_network_throughput(self):
+        # physical NICs only: a bond (lag0) or bridge would count its ports' traffic twice
+        try:
+            nics = tuple(sorted(p.name for p in NET_SYSFS.iterdir() if (p / 'device').exists()))
+            if not nics:
+                return None, None
+            rx = tx = 0
+            for nic in nics:
+                stats = NET_SYSFS / nic / 'statistics'
+                rx += int((stats / 'rx_bytes').read_text())
+                tx += int((stats / 'tx_bytes').read_text())
+        except (OSError, ValueError):
+            return None, None
+
+        now = time.monotonic()
+        prev, self.prev_net = self.prev_net, (nics, rx, tx, now)
+        if prev is None or prev[0] != nics:
+            return None, None
+        elapsed = now - prev[3]
+        if elapsed <= 0 or rx < prev[1] or tx < prev[2]:
+            return None, None
+        return (
+            round((rx - prev[1]) / elapsed / 1_000_000, 2),
+            round((tx - prev[2]) / elapsed / 1_000_000, 2),
+        )
 
     def get_disk_throughput(self):
         def read_diskstats():

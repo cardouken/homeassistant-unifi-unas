@@ -19,6 +19,12 @@
       "disk_write": {
         "default": "mdi:upload"
       },
+      "network_rx": {
+        "default": "mdi:download-network"
+      },
+      "network_tx": {
+        "default": "mdi:upload-network"
+      },
       "smb_connections": {
         "default": "mdi:server-network"
       },

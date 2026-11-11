@@ -210,6 +210,12 @@
       "disk_write": {
         "name": "Disk Write"
       },
+      "network_rx": {
+        "name": "Network Download"
+      },
+      "network_tx": {
+        "name": "Network Upload"
+      },
       "smb_connections": {
         "name": "SMB Connections"
       },

@@ -490,6 +490,26 @@
    "suggested_unit": "GiB",
    "unit": "GiB"
   },
+  "unas_network_rx": {
+   "device_class": "data_rate",
+   "entity_id": "sensor.unas_network_download",
+   "icon": "mdi:download-network",
+   "name": "Network Download",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "MB/s"
+  },
+  "unas_network_tx": {
+   "device_class": "data_rate",
+   "entity_id": "sensor.unas_network_upload",
+   "icon": "mdi:upload-network",
+   "name": "Network Upload",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "MB/s"
+  },
   "unas_nfs_mounts": {
    "device_class": null,
    "entity_id": "sensor.unas_nfs_mounts",
@@ -1241,6 +1261,26 @@
    "state_class": "measurement",
    "suggested_unit": "GiB",
    "unit": "GiB"
+  },
+  "unas_network_rx": {
+   "device_class": "data_rate",
+   "entity_id": "sensor.unas_network_download",
+   "icon": "mdi:download-network",
+   "name": "Network Download",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "MB/s"
+  },
+  "unas_network_tx": {
+   "device_class": "data_rate",
+   "entity_id": "sensor.unas_network_upload",
+   "icon": "mdi:upload-network",
+   "name": "Network Upload",
+   "precision": 2,
+   "state_class": "measurement",
+   "suggested_unit": null,
+   "unit": "MB/s"
   },
   "unas_nvme_0_available_spare": {
    "device_class": null,
